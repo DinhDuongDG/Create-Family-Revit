@@ -177,3 +177,60 @@ export async function buildFamily(spec: FamilySpec): Promise<BuildResult> {
 
   return payload;
 }
+
+// -------------------------------------------------------------
+// Model Library API (Lưu, Quản lý, Tiếp tục sửa, Xoá)
+// -------------------------------------------------------------
+export interface SavedModelMeta {
+  id: string;
+  name: string;
+  category: string;
+  updatedAt: number;
+  partsCount: number;
+  paramsCount: number;
+}
+
+export interface SavedModelDetail {
+  id: string;
+  name: string;
+  spec: FamilySpec;
+  entries: any[];
+  savedAt: number;
+}
+
+export async function fetchSavedModels(): Promise<SavedModelMeta[]> {
+  try {
+    const res = await fetch("/api/models");
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.models || [];
+  } catch {
+    return [];
+  }
+}
+
+export async function fetchSavedModelDetail(id: string): Promise<SavedModelDetail | null> {
+  try {
+    const res = await fetch(`/api/models/${encodeURIComponent(id)}`);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function saveModel(payload: { id?: string; name?: string; spec: FamilySpec; entries?: any[] }): Promise<{ ok: boolean; id?: string }> {
+  const res = await fetch("/api/models", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return await res.json();
+}
+
+export async function deleteSavedModel(id: string): Promise<{ ok: boolean }> {
+  const res = await fetch(`/api/models/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  return await res.json();
+}

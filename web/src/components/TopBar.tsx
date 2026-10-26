@@ -1,3 +1,4 @@
+import { useState, useRef, useEffect } from "react";
 import type { Units } from "../lib/format";
 
 interface Props {
@@ -15,6 +16,10 @@ interface Props {
   onBuild: () => void;
   canBuild: boolean;
   building: boolean;
+  onSaveModel?: () => void;
+  onOpenLibrary?: () => void;
+  onNewModel?: () => void;
+  onLoadDemo?: (key: "fcu" | "pump" | "elbow") => void;
 }
 
 const AGENT_STEPS = ["Read brief", "Design family", "Check model"];
@@ -50,8 +55,24 @@ export function TopBar({
   onBuild,
   canBuild,
   building,
+  onSaveModel,
+  onOpenLibrary,
+  onNewModel,
+  onLoadDemo,
 }: Props) {
   const currentStep = getAgentStepIndex(agentStage);
+  const [demoOpen, setDemoOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setDemoOpen(false);
+      }
+    };
+    window.addEventListener("mousedown", handleClickOutside);
+    return () => window.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   return (
     <header className="topbar">
@@ -97,6 +118,87 @@ export function TopBar({
       </div>
 
       <div className="top-actions">
+        {onLoadDemo && (
+          <div className="demo-dropdown-container" ref={dropdownRef}>
+            <button
+              type="button"
+              className={`btn-secondary btn-demo ${demoOpen ? "active" : ""}`}
+              onClick={() => setDemoOpen((curr) => !curr)}
+              title="Nạp nhanh mô hình mẫu để test tính năng (Không tốn token AI)"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polygon points="12 2 2 7 12 12 22 7 12 2" />
+                <polyline points="2 17 12 22 22 17" />
+                <polyline points="2 12 12 17 22 12" />
+              </svg>
+              <span>Demo Presets ▾</span>
+            </button>
+            {demoOpen && (
+              <div className="demo-dropdown-menu show">
+                <div className="demo-dropdown-header">Mẫu thử nghiệm (Offline - 0 token)</div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onLoadDemo("fcu");
+                    setDemoOpen(false);
+                  }}
+                >
+                  🌀 FCU Giấu trần 080 (Trane)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onLoadDemo("pump");
+                    setDemoOpen(false);
+                  }}
+                >
+                  ⚡ Bơm ly tâm thẳng hàng DN80
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onLoadDemo("elbow");
+                    setDemoOpen(false);
+                  }}
+                >
+                  📐 Cút ren 90° Duct Elbow DN50
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {onNewModel && (
+          <button type="button" className="btn-secondary" onClick={onNewModel} title="Bắt đầu tạo mô hình mới (xóa màn hình)">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            <span>New family</span>
+          </button>
+        )}
+
+        {onOpenLibrary && (
+          <button type="button" className="btn-secondary" onClick={onOpenLibrary} title="Mở danh sách các mô hình đã lưu">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+            </svg>
+            <span>Library</span>
+          </button>
+        )}
+
+        {hasSpec && onSaveModel && (
+          <button type="button" className="btn-secondary" onClick={onSaveModel} title="Lưu mô hình này lại">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+              <polyline points="17 21 17 13 7 13 7 21" />
+              <polyline points="7 3 7 8 15 8" />
+            </svg>
+            <span>Save</span>
+          </button>
+        )}
+
         <div className="segmented" role="group" aria-label="Units">
           <button type="button" className={units === "mm" ? "active" : ""} onClick={() => onUnits("mm")}>
             mm

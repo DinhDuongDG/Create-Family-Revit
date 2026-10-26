@@ -51,8 +51,25 @@ export interface ResolvedPart {
   array: { count: number; axis: Axis; spacing: number };
 }
 
+export interface ResolvedConnector {
+  id: string;
+  name: string;
+  systemType: string;
+  shape: "round" | "rectangular";
+  direction: "in" | "out" | "bidirectional";
+  origin: Vec3n;
+  directionVector: Vec3n;
+  width?: number;
+  height?: number;
+  diameter?: number;
+  flow?: number;
+  flowUnit?: string;
+  pressureDrop?: number;
+}
+
 export interface ResolvedModel {
   parts: ResolvedPart[];
+  connectors: ResolvedConnector[];
   instances: number;
   issues: Issue[];
   bounds: Bounds | null;
@@ -324,6 +341,43 @@ export function resolveModel(
     }
   });
 
+  const connectors: ResolvedConnector[] = [];
+  if (Array.isArray(spec.connectors)) {
+    spec.connectors.forEach((conn, index) => {
+      const path = `connectors[${index}]`;
+      try {
+        const origin: Vec3n = {
+          x: num(conn.origin?.x, `${path}.origin.x`, 0),
+          y: num(conn.origin?.y, `${path}.origin.y`, 0),
+          z: num(conn.origin?.z, `${path}.origin.z`, 0),
+        };
+        const directionVector: Vec3n = {
+          x: num(conn.directionVector?.x, `${path}.directionVector.x`, 0),
+          y: num(conn.directionVector?.y, `${path}.directionVector.y`, -1),
+          z: num(conn.directionVector?.z, `${path}.directionVector.z`, 0),
+        };
+        connectors.push({
+          id: conn.id,
+          name: conn.name,
+          systemType: conn.systemType,
+          shape: conn.shape,
+          direction: conn.direction,
+          origin,
+          directionVector,
+          width: conn.width !== undefined ? num(conn.width, `${path}.width`, 0) : undefined,
+          height: conn.height !== undefined ? num(conn.height, `${path}.height`, 0) : undefined,
+          diameter: conn.diameter !== undefined ? num(conn.diameter, `${path}.diameter`, 0) : undefined,
+          flow: conn.flow !== undefined ? num(conn.flow, `${path}.flow`, 0) : undefined,
+          flowUnit: conn.flowUnit,
+          pressureDrop: conn.pressureDrop !== undefined ? num(conn.pressureDrop, `${path}.pressureDrop`, 0) : undefined,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        issues.push({ severity: "error", path, message });
+      }
+    });
+  }
+
   const bounds = emptyBounds();
   let instances = 0;
   for (const part of parts) {
@@ -341,6 +395,7 @@ export function resolveModel(
 
   return {
     parts,
+    connectors,
     instances,
     issues,
     bounds: finalize(bounds),

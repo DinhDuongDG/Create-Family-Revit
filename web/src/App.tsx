@@ -8,16 +8,26 @@ import {
   type Issue,
   type ParameterType,
 } from "@family/spec-core";
+import fcuExampleRaw from "../../spec/examples/fcu-080.json";
+import pumpExampleRaw from "../../spec/examples/pump-dn80.json";
 import { ChatPanel, type ChatEntry } from "./components/ChatPanel";
 import { ParameterPanel } from "./components/ParameterPanel";
 import { TopBar } from "./components/TopBar";
 import { Viewer } from "./components/Viewer";
-import { buildFamily, fetchHealth, streamDesign, uploadDocument, type Health, type UploadedDocument } from "./lib/api";
+import {
+  buildFamily,
+  fetchHealth,
+  streamDesign,
+  uploadDocument,
+  fetchSavedModels,
+  fetchSavedModelDetail,
+  saveModel,
+  deleteSavedModel,
+  type Health,
+  type UploadedDocument,
+  type SavedModelMeta,
+} from "./lib/api";
 import { formatDuration, type Units } from "./lib/format";
-import exampleRaw from "../../spec/examples/fcu-080.json";
-
-const EXAMPLE_SPEC: FamilySpec = validateSpec(exampleRaw).spec;
-const EXAMPLE_ANALYSIS = analyzeSpec(EXAMPLE_SPEC);
 
 function newId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
@@ -37,13 +47,12 @@ interface ToastState {
 }
 
 export function App() {
-  const [spec, setSpec] = useState<FamilySpec | null>(EXAMPLE_SPEC);
+  const [spec, setSpec] = useState<FamilySpec | null>(null);
   const [entries, setEntries] = useState<ChatEntry[]>([
     {
       id: "seed",
       role: "agent",
-      text: `Loaded the reference family ${EXAMPLE_SPEC.name}.\nAsk for a change, or describe a different unit and I will model it from scratch.`,
-      meta: `${EXAMPLE_ANALYSIS.model.parts.length} parts · ${EXAMPLE_SPEC.parameters.length} parameters · ${EXAMPLE_ANALYSIS.model.instances} solids`,
+      text: "Xin chào! Hãy mô tả thiết bị bạn cần dựng hoặc kéo thả tài liệu/bản vẽ (PDF, ảnh) vào đây để tôi bắt đầu thiết kế từ đầu.",
     },
   ]);
   const [stage, setStage] = useState<StageState | null>(null);
@@ -58,12 +67,17 @@ export function App() {
   const [attachments, setAttachments] = useState<UploadedDocument[]>([]);
   const [uploading, setUploading] = useState(false);
   const [showGrid, setShowGrid] = useState(true);
-  const [showPlanes, setShowPlanes] = useState(true);
+  const [showPlanes, setShowPlanes] = useState(false);
+  const [showConnectors, setShowConnectors] = useState(false);
+  const [showHandles, setShowHandles] = useState(false);
   const [selectedPartId, setSelectedPartId] = useState<string | null>(null);
   const [hiddenPartIds, setHiddenPartIds] = useState<string[]>([]);
   const [transparentPartIds, setTransparentPartIds] = useState<string[]>([]);
   const [health, setHealth] = useState<Health | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
+  const [currentModelId, setCurrentModelId] = useState<string | null>(null);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [savedList, setSavedList] = useState<SavedModelMeta[]>([]);
   const abortRef = useRef<AbortController | null>(null);
 
   const analysis = useMemo(() => (spec ? analyzeSpec(spec) : null), [spec]);
@@ -291,6 +305,289 @@ export function App() {
     }
   };
 
+  const handleSaveModel = async () => {
+    if (!spec) return;
+    try {
+      const res = await saveModel({
+        id: currentModelId || undefined,
+        name: spec.name,
+        spec,
+        entries,
+      });
+      if (res.ok && res.id) {
+        setCurrentModelId(res.id);
+        setToast({
+          text: "Đã lưu mô hình thành công!",
+          sub: `ID: ${res.id}`,
+          tone: "ok",
+        });
+      }
+    } catch (error) {
+      setToast({
+        text: `Lưu thất bại: ${error instanceof Error ? error.message : String(error)}`,
+        tone: "error",
+      });
+    }
+  };
+
+  const handleOpenLibrary = async () => {
+    setLibraryOpen(true);
+    const list = await fetchSavedModels();
+    setSavedList(list);
+  };
+
+  const handleLoadModel = async (id: string) => {
+    try {
+      const detail = await fetchSavedModelDetail(id);
+      if (detail && detail.spec) {
+        setSpec(detail.spec);
+        setCurrentModelId(detail.id);
+        if (Array.isArray(detail.entries) && detail.entries.length > 0) {
+          setEntries(detail.entries);
+        } else {
+          setEntries([
+            {
+              id: newId(),
+              role: "agent",
+              text: `Đã nạp lại mô hình đã lưu: ${detail.spec.name}.\nBạn có thể tiếp tục trò chuyện để yêu cầu chỉnh sửa hoặc thay đổi thông số.`,
+            },
+          ]);
+        }
+        setLibraryOpen(false);
+        setToast({
+          text: `Đã mở mô hình: ${detail.name}`,
+          tone: "ok",
+        });
+      }
+    } catch (error) {
+      setToast({
+        text: `Không thể mở mô hình: ${error instanceof Error ? error.message : String(error)}`,
+        tone: "error",
+      });
+    }
+  };
+
+  const handleDeleteModel = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!window.confirm("Bạn có chắc chắn muốn xoá mô hình này khỏi thư viện?")) return;
+    try {
+      await deleteSavedModel(id);
+      setSavedList((curr) => curr.filter((item) => item.id !== id));
+      if (currentModelId === id) {
+        setCurrentModelId(null);
+      }
+      setToast({
+        text: "Đã xoá mô hình",
+        tone: "ok",
+      });
+    } catch (error) {
+      setToast({
+        text: `Xoá thất bại: ${error instanceof Error ? error.message : String(error)}`,
+        tone: "error",
+      });
+    }
+  };
+
+  const handleNewModel = () => {
+    if (spec && !window.confirm("Bắt đầu mô hình mới? Hãy chắc chắn bạn đã bấm Save nếu muốn lưu mô hình hiện tại.")) {
+      return;
+    }
+    setSpec(null);
+    setCurrentModelId(null);
+    setEntries([
+      {
+        id: "seed",
+        role: "agent",
+        text: "Xin chào! Hãy mô tả thiết bị bạn cần dựng hoặc kéo thả tài liệu/bản vẽ (PDF, ảnh) vào đây để tôi bắt đầu thiết kế từ đầu.",
+      },
+    ]);
+  };
+
+  const handleLoadDemo = (key: "fcu" | "pump" | "elbow") => {
+    let demoRaw: any = null;
+    let userPromptText = "";
+    if (key === "fcu") {
+      demoRaw = fcuExampleRaw;
+      userPromptText = "Dựng FCU âm trần nối ống gió Daikin FXDQ-SPV1 (Demo Preset)";
+    } else if (key === "pump") {
+      demoRaw = pumpExampleRaw;
+      userPromptText = "Dựng bơm ly tâm trục ngang Grundfos NB 50-200 (Demo Preset)";
+    } else if (key === "elbow") {
+      userPromptText = "Dựng cút gió 90 độ nối ren DN50 (Demo Preset)";
+      demoRaw = {
+        schemaVersion: "1.0",
+        name: "Threaded 90 Deg Duct Elbow DN50",
+        typeName: "Elbow 90 DN50",
+        category: "Duct Elbow",
+        units: "mm",
+        description: "90 degree threaded elbow DN50 with end bands and connectors",
+        parameters: [
+          { name: "Nominal Diameter", type: "Length", group: "Dimensions", value: 50 },
+          { name: "Center Radius", type: "Length", group: "Dimensions", value: 57 },
+          { name: "Body OD", type: "Length", group: "Dimensions", value: 68 },
+          { name: "Band OD", type: "Length", group: "Dimensions", value: 76.5 },
+          { name: "Band Length", type: "Length", group: "Dimensions", value: 12 },
+          { name: "Takeoff Length", type: "Length", group: "Dimensions", value: 69 },
+        ],
+        materials: [
+          { name: "Cast Iron", color: "#61676c", roughness: 0.65, metalness: 0.4 },
+          { name: "Galvanized Trim", color: "#9aa1a6", roughness: 0.45, metalness: 0.5 },
+        ],
+        parts: [
+          {
+            id: "elbow-body",
+            name: "Elbow Center Body",
+            material: "Cast Iron",
+            solid: {
+              kind: "cylinder",
+              axis: "z",
+              base: { x: 0, y: 0, z: -34 },
+              radius: "[Body OD] / 2",
+              height: 68,
+            },
+          },
+          {
+            id: "flange-port-1",
+            name: "End Band Port 1 (+X)",
+            material: "Galvanized Trim",
+            solid: {
+              kind: "cylinder",
+              axis: "x",
+              base: { x: "[Center Radius]", y: 0, z: 0 },
+              radius: "[Band OD] / 2",
+              height: 12,
+            },
+          },
+          {
+            id: "flange-port-2",
+            name: "End Band Port 2 (-Y)",
+            material: "Galvanized Trim",
+            solid: {
+              kind: "cylinder",
+              axis: "y",
+              base: { x: 0, y: "-[Center Radius]", z: 0 },
+              radius: "[Band OD] / 2",
+              height: -12,
+            },
+          },
+        ],
+        connectors: [
+          {
+            id: "conn-1",
+            name: "Connector 1",
+            systemType: "SupplyAir",
+            shape: "round",
+            direction: "out",
+            origin: { x: 69, y: 0, z: 0 },
+            directionVector: { x: 1, y: 0, z: 0 },
+            diameter: 50,
+          },
+          {
+            id: "conn-2",
+            name: "Connector 2",
+            systemType: "SupplyAir",
+            shape: "round",
+            direction: "in",
+            origin: { x: 0, y: -69, z: 0 },
+            directionVector: { x: 0, y: -1, z: 0 },
+            diameter: 50,
+          },
+        ],
+      };
+    }
+
+    if (!demoRaw) return;
+    const parsed = validateSpec(demoRaw).spec;
+
+    // Reset viewport and start simulated Agent run
+    setSpec(null);
+    setSelectedPartId(null);
+    setHiddenPartIds([]);
+    setTransparentPartIds([]);
+    setCurrentModelId(null);
+    setRunning(true);
+    const startSimTime = Date.now();
+    setRunStartedAt(startSimTime);
+    setNow(startSimTime);
+
+    pushEntry({
+      role: "user",
+      text: userPromptText,
+    });
+
+    // Step 1: Reading (t=0)
+    setStage({ stage: "reading", message: "Đang đọc bản vẽ và tài liệu kỹ thuật..." });
+
+    // Step 2: Thinking / Analyzing (t=700ms)
+    setTimeout(() => {
+      setStage({ stage: "thinking", message: "Phân tích đầu nối MEP, kích thước & mặt phẳng làm việc..." });
+    }, 700);
+
+    // Step 3: Progressive Generation directly in real time (Agent dựng từng part như xây nhà)
+    const allParts = parsed.parts || [];
+    const baseDelay = 1500;
+    const partStep = 450; // mỗi part cách nhau 450ms
+
+    // Bắt đầu dựng part đầu tiên
+    setTimeout(() => {
+      setStage({
+        stage: "generating",
+        message: `Đang dựng: ${allParts[0]?.name || "Khung chính"} (1/${allParts.length})`,
+      });
+      setSpec({
+        ...parsed,
+        parts: allParts.slice(0, 1),
+        connectors: [],
+      });
+    }, baseDelay);
+
+    // Các part tiếp theo mọc dần lên
+    for (let i = 2; i <= allParts.length; i++) {
+      setTimeout(() => {
+        setStage({
+          stage: "generating",
+          message: `Đang dựng: ${allParts[i - 1]?.name || `Part ${i}`} (${i}/${allParts.length})`,
+        });
+        setSpec({
+          ...parsed,
+          parts: allParts.slice(0, i),
+          connectors: i === allParts.length ? parsed.connectors : [],
+        });
+      }, baseDelay + (i - 1) * partStep);
+    }
+
+    const totalBuildTime = baseDelay + allParts.length * partStep;
+
+    // Step 4: Checking & validation
+    setTimeout(() => {
+      setStage({ stage: "checking", message: "Kiểm tra ràng buộc công thức & MEP connector..." });
+    }, totalBuildTime + 200);
+
+    // Step 5: Finish
+    setTimeout(() => {
+      setRunning(false);
+      setRunStartedAt(null);
+      setStage(null);
+      setSpec(parsed);
+
+      const partCount = parsed.parts?.length ?? 0;
+      const paramCount = parsed.parameters?.length ?? 0;
+      pushEntry({
+        role: "agent",
+        text: `⚡ [Giả lập Agent - 0 token] Đã hoàn thành thiết kế ${parsed.name}.\n${partCount} parts · ${paramCount} parameters`,
+        notes: Array.isArray(parsed.notes)
+          ? parsed.notes
+          : [parsed.notes || "Chạy giả lập kiểm thử giao diện & hiệu ứng dựng tuần tự từng part thời gian thực thành công."],
+        meta: `${((totalBuildTime + 600) / 1000).toFixed(1)}s · Simulated pass`,
+      });
+
+      setToast({
+        text: `Đã hoàn thành dựng mô hình: ${parsed.name}`,
+        tone: "ok",
+      });
+    }, totalBuildTime + 600);
+  };
+
   return (
     <div className="app">
       <TopBar
@@ -308,6 +605,10 @@ export function App() {
         onBuild={handleBuild}
         canBuild={Boolean(analysis?.ok)}
         building={building}
+        onSaveModel={handleSaveModel}
+        onOpenLibrary={handleOpenLibrary}
+        onNewModel={handleNewModel}
+        onLoadDemo={handleLoadDemo}
       />
 
       <div className="workspace">
@@ -347,6 +648,10 @@ export function App() {
           onToggleGrid={() => setShowGrid((current) => !current)}
           showPlanes={showPlanes}
           onTogglePlanes={() => setShowPlanes((current) => !current)}
+          showConnectors={showConnectors}
+          onToggleConnectors={() => setShowConnectors((current) => !current)}
+          showHandles={showHandles}
+          onToggleHandles={() => setShowHandles((current) => !current)}
           selectedPartId={selectedPartId}
           onSelectPart={setSelectedPartId}
           hiddenPartIds={hiddenPartIds}
@@ -391,6 +696,72 @@ export function App() {
         <div className={`toast ${toast.tone === "error" ? "error" : ""}`}>
           {toast.text}
           {toast.sub && <span className="sub">{toast.sub}</span>}
+        </div>
+      )}
+
+      {libraryOpen && (
+        <div className="modal-backdrop" onClick={() => setLibraryOpen(false)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="title-row">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                  <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+                </svg>
+                <h3>Thư viện mô hình đã lưu ({savedList.length})</h3>
+              </div>
+              <div className="header-actions">
+                <button type="button" className="btn-ghost" onClick={handleNewModel}>
+                  + Dựng mô hình mới
+                </button>
+                <button type="button" className="modal-close" onClick={() => setLibraryOpen(false)}>
+                  ×
+                </button>
+              </div>
+            </div>
+
+            <div className="modal-body">
+              {savedList.length === 0 ? (
+                <div className="empty-library">
+                  <p>Chưa có mô hình nào được lưu trong thư viện.</p>
+                  <p className="sub">Khi đang xem hoặc chỉnh sửa 1 mô hình trên Web, bấm nút <strong>Save</strong> trên thanh trên cùng để lưu lại.</p>
+                </div>
+              ) : (
+                <div className="saved-model-grid">
+                  {savedList.map((item) => (
+                    <div
+                      key={item.id}
+                      className={`saved-model-card ${currentModelId === item.id ? "active" : ""}`}
+                      onClick={() => handleLoadModel(item.id)}
+                    >
+                      <div className="card-top">
+                        <span className="model-cat">{item.category}</span>
+                        <button
+                          type="button"
+                          className="btn-delete-model"
+                          title="Xoá mô hình này"
+                          onClick={(e) => handleDeleteModel(item.id, e)}
+                        >
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <polyline points="3 6 5 6 21 6" />
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                          </svg>
+                        </button>
+                      </div>
+                      <h4 className="model-name">{item.name}</h4>
+                      <div className="model-meta">
+                        <span>{item.partsCount} parts</span>
+                        <span>·</span>
+                        <span>{item.paramsCount} params</span>
+                        <span>·</span>
+                        <span>{new Date(item.updatedAt).toLocaleDateString()}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

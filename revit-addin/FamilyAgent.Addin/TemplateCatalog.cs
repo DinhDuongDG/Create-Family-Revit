@@ -12,6 +12,12 @@ namespace FamilyAgent.Addin
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
                 { "Mechanical Equipment", "Metric Mechanical Equipment.rft" },
+                { "Duct Fitting", "Metric Duct Elbow.rft" },
+                { "Duct Elbow", "Metric Duct Elbow.rft" },
+                { "Duct Transition", "Metric Duct Transition.rft" },
+                { "Duct Tee", "Metric Duct Tee.rft" },
+                { "Duct Cross", "Metric Duct Cross.rft" },
+                { "Pipe Fitting", "Metric Generic Model.rft" },
                 { "Generic Model", "Metric Generic Model.rft" },
                 { "Plumbing Fixture", "Metric Plumbing Fixture.rft" },
                 { "Electrical Equipment", "Metric Electrical Equipment.rft" },

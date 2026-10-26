@@ -52,6 +52,7 @@ export const config = {
     webDist: path.join(ROOT, "web", "dist"),
     prompts: path.join(ROOT, "server", "prompts"),
     uploads: path.join(ROOT, ".uploads"),
+    saved: path.join(ROOT, "saved-models"),
     out: process.env.FAMILY_OUT_DIR || path.join(home, "Documents", "FamilyAgent", "out"),
     queue: process.env.FAMILY_QUEUE_DIR || path.join(home, "Documents", "FamilyAgent", "queue"),
   },

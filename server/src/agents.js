@@ -20,7 +20,7 @@ function flatten(messages) {
     .map((message) => `${message.role === "assistant" ? "ASSISTANT" : "USER"}:\n${message.content}`)
     .join("\n\n---\n\n");
 
-  return `${system}\n\n---\n\n${turns}\n\nIMPORTANT: Do not explore with tools or run multiple conversational turns. Output the complete valid JSON object immediately.`;
+  return `${system}\n\n---\n\n${turns}\n\nCRITICAL OUTPUT REQUIREMENT:\n- Return ONLY a single raw JSON object representing the complete spec.\n- Do NOT write conversational explanations, markdown notes, or preface text before or after the JSON.\n- Ensure all quotes and brackets inside string expressions (e.g. \"[Casing Length] / 2\") are properly closed and valid JSON.`;
 }
 
 function extractResult(stdout) {

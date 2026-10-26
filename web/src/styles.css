@@ -651,20 +651,27 @@ textarea {
   z-index: 4;
 }
 
-/* 3D Revit-style ViewCube - Seamless transparent overlay */
+/* 3D Revit-style ViewCube - Seamless transparent overlay with subtle hover */
 .viewcube-container {
   position: absolute;
-  top: 8px;
-  right: 10px;
+  top: 10px;
+  right: 12px;
   z-index: 5;
-  width: 95px;
-  height: 95px;
+  width: 110px;
+  height: 110px;
   cursor: pointer;
   user-select: none;
   background: transparent;
   border: none;
   box-shadow: none;
   outline: none;
+  opacity: 0.6; /* Trong suốt mờ mờ tinh tế khi không tương tác */
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.viewcube-container:hover {
+  opacity: 1.0; /* Đậm nét rõ ràng khi rê chuột vào */
+  transform: scale(1.03);
 }
 
 .viewcube-container canvas {
@@ -1480,4 +1487,314 @@ textarea {
 .btn-part-action.active {
   color: #0969da;
   background: rgba(9, 105, 218, 0.1);
+}
+
+/* -------------------------------------------------------------
+ * Model Library Modal
+ * ------------------------------------------------------------- */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.5);
+  backdrop-filter: blur(4px);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fadeIn 0.15s ease-out;
+}
+
+.modal-card {
+  width: 90%;
+  max-width: 680px;
+  max-height: 80vh;
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: slideUp 0.15s ease-out;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.modal-header .title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #1f2328;
+}
+
+.modal-header .header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.modal-close {
+  background: transparent;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  color: #57606a;
+  padding: 0 4px;
+}
+
+.modal-close:hover {
+  color: #1f2328;
+}
+
+.modal-body {
+  padding: 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.empty-library {
+  text-align: center;
+  padding: 40px 20px;
+  color: #57606a;
+}
+
+.empty-library p {
+  margin: 0 0 6px 0;
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.empty-library .sub {
+  font-size: 13px;
+  color: #8c959f;
+}
+
+.saved-model-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 14px;
+}
+
+.saved-model-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  cursor: pointer;
+  background: #fafbfc;
+  transition: all 0.15s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.saved-model-card:hover {
+  background: #ffffff;
+  border-color: #0969da;
+  box-shadow: 0 4px 12px rgba(9, 105, 218, 0.08);
+}
+
+.saved-model-card.active {
+  border-color: #0969da;
+  background: #f0f7ff;
+}
+
+.saved-model-card .card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.saved-model-card .model-cat {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: #57606a;
+  background: #eaeef2;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.saved-model-card .model-name {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #1f2328;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.saved-model-card .model-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #57606a;
+}
+
+.btn-delete-model {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  color: #8c959f;
+  transition: all 0.15s;
+}
+
+.btn-delete-model:hover {
+  background: #ffebe9;
+  color: #cf222e;
+}
+
+/* -------------------------------------------------------------
+ * Progressive Assembly Badge & Animation
+ * ------------------------------------------------------------- */
+.viewer-assembly-badge {
+  position: absolute;
+  top: 60px;
+  left: 20px;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(8px);
+  color: #0969da;
+  border: 1px solid #d0d7de;
+  border-radius: 20px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 4px 12px rgba(9, 105, 218, 0.15);
+  animation: slideInLeft 0.2s ease-out;
+  pointer-events: none;
+  z-index: 500;
+}
+
+.assembly-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #0969da;
+  box-shadow: 0 0 0 0 rgba(9, 105, 218, 0.7);
+  animation: pulseBlue 1.2s infinite;
+}
+
+@keyframes pulseBlue {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(9, 105, 218, 0.7);
+  }
+  70% {
+    transform: scale(1);
+    box-shadow: 0 0 0 6px rgba(9, 105, 218, 0);
+  }
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(9, 105, 218, 0);
+  }
+}
+
+@keyframes slideInLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* -------------------------------------------------------------
+ * Dev Demo Presets Dropdown
+ * ------------------------------------------------------------- */
+.demo-dropdown-container {
+  position: relative;
+}
+
+.btn-demo {
+  color: #0969da;
+  border-color: #d0d7de;
+  background: #f6f8fa;
+  font-weight: 600;
+}
+
+.btn-demo:hover,
+.btn-demo.active {
+  background: #f0f7ff;
+  border-color: #0969da;
+}
+
+.demo-dropdown-menu.show {
+  display: flex;
+}
+
+.demo-dropdown-menu {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  background: #ffffff;
+  border: 1px solid #d0d7de;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(140, 149, 159, 0.2);
+  min-width: 260px;
+  flex-direction: column;
+  padding: 6px;
+  z-index: 1000;
+  animation: contextMenuFadeIn 0.12s ease-out;
+}
+
+.demo-dropdown-header {
+  font-size: 11px;
+  font-weight: 600;
+  color: #57606a;
+  text-transform: uppercase;
+  padding: 6px 10px 4px 10px;
+  letter-spacing: 0.03em;
+}
+
+.demo-dropdown-menu button {
+  background: transparent;
+  border: none;
+  text-align: left;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #24292f;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.demo-dropdown-menu button:hover {
+  background: #f0f7ff;
+  color: #0969da;
 }

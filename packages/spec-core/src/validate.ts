@@ -371,6 +371,28 @@ export function validateSpec(raw: unknown): ValidationResult {
         }))
     : undefined;
 
+  const connectors = Array.isArray(root.connectors)
+    ? root.connectors
+        .filter(isObject)
+        .map((conn, idx) => ({
+          id: sanitizeId(text(conn.id) || text(conn.name), `connector-${idx + 1}`),
+          name: text(conn.name) || `Connector ${idx + 1}`,
+          systemType: (text(conn.systemType) || "SupplyAir") as any,
+          shape: (text(conn.shape) === "round" ? "round" : "rectangular") as any,
+          direction: (["in", "out", "bidirectional"].includes(text(conn.direction))
+            ? text(conn.direction)
+            : "out") as any,
+          origin: (isObject(conn.origin) ? conn.origin : { x: 0, y: 0, z: 0 }) as any,
+          directionVector: isObject(conn.directionVector) ? (conn.directionVector as any) : undefined,
+          width: conn.width as any,
+          height: conn.height as any,
+          diameter: conn.diameter as any,
+          flow: conn.flow as any,
+          flowUnit: conn.flowUnit as any,
+          pressureDrop: conn.pressureDrop as any,
+        }))
+    : undefined;
+
   const spec: FamilySpec = {
     schemaVersion: "1.0",
     name,
@@ -382,6 +404,7 @@ export function validateSpec(raw: unknown): ValidationResult {
     description: text(root.description) || undefined,
     parameters,
     parts,
+    connectors,
     materials,
     notes: Array.isArray(root.notes) ? root.notes.map((note) => String(note)) : undefined,
   };

@@ -14,6 +14,10 @@ interface Props {
   onToggleGrid: () => void;
   showPlanes?: boolean;
   onTogglePlanes?: () => void;
+  showConnectors?: boolean;
+  onToggleConnectors?: () => void;
+  showHandles?: boolean;
+  onToggleHandles?: () => void;
   selectedPartId?: string | null;
   onSelectPart?: (partId: string | null) => void;
   hiddenPartIds?: string[];
@@ -51,6 +55,7 @@ interface SceneState {
   handlesGroup: THREE.Group;
   grid: THREE.GridHelper;
   refPlanesGroup: THREE.Group;
+  connectorsGroup: THREE.Group;
   disposables: (THREE.BufferGeometry | THREE.Material)[];
 }
 
@@ -63,6 +68,8 @@ export function Viewer({
   onToggleGrid,
   showPlanes = true,
   onTogglePlanes,
+  showConnectors = true,
+  onToggleConnectors,
   selectedPartId,
   onSelectPart,
   hiddenPartIds = [],
@@ -107,6 +114,75 @@ export function Viewer({
     y: number;
   } | null>(null);
 
+  const [visiblePartCount, setVisiblePartCount] = useState<number>(0);
+  const prevModelRef = useRef<ResolvedModel | null>(null);
+
+  const [animatingPartName, setAnimatingPartName] = useState<string | null>(null);
+  const [turntableActive, setTurntableActive] = useState<boolean>(false);
+  const turntableRef = useRef<boolean>(false);
+  turntableRef.current = turntableActive;
+
+  const statusRef = useRef(status);
+  statusRef.current = status;
+
+  // Khi Agent bắt đầu làm việc hoặc khi status xuất hiện -> tự động kích hoạt Turntable
+  useEffect(() => {
+    if (status) {
+      setTurntableActive(true);
+    }
+  }, [status]);
+
+  useEffect(() => {
+    if (!model || model.parts.length === 0) {
+      setVisiblePartCount(0);
+      setAnimatingPartName(null);
+      prevModelRef.current = null;
+      return;
+    }
+
+    const prevParts = prevModelRef.current?.parts;
+
+    // Nếu số lượng part đang tăng dần từng bước (khi Agent trực tiếp đắp part)
+    if (prevParts && model.parts.length > prevParts.length) {
+      prevModelRef.current = model;
+      setVisiblePartCount(model.parts.length);
+      const newestPart = model.parts[model.parts.length - 1];
+      setAnimatingPartName(newestPart?.name || null);
+      const timer = setTimeout(() => {
+        setAnimatingPartName(null);
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+
+    const isDifferent =
+      !prevParts ||
+      prevParts.length !== model.parts.length ||
+      model.parts.some((p, i) => prevParts[i]?.id !== p.id || prevParts[i]?.name !== p.name);
+
+    prevModelRef.current = model;
+
+    if (isDifferent) {
+      // Khi nạp 1 model mới hoàn chỉnh vào
+      setVisiblePartCount(1);
+      setAnimatingPartName(model.parts[0]?.name || null);
+      let count = 1;
+      const total = model.parts.length;
+      const interval = setInterval(() => {
+        count += 1;
+        setVisiblePartCount(count);
+        setAnimatingPartName(model.parts[count - 1]?.name || null);
+        if (count >= total) {
+          clearInterval(interval);
+          setTimeout(() => setAnimatingPartName(null), 1200);
+        }
+      }, 350);
+      return () => clearInterval(interval);
+    } else {
+      setVisiblePartCount(model.parts.length);
+      setAnimatingPartName(null);
+    }
+  }, [model]);
+
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
@@ -130,6 +206,13 @@ export function Viewer({
     controls.minDistance = 80;
     controls.maxDistance = 60000;
     controls.maxPolarAngle = Math.PI - 0.05;
+
+    // Tự động tắt Turntable khi người dùng chủ động tương tác/xoay/zoom bằng chuột
+    controls.addEventListener("start", () => {
+      if (turntableRef.current) {
+        setTurntableActive(false);
+      }
+    });
 
     // Standard CAD / Revit mouse mapping:
     // Left click: Rotate / Orbit
@@ -163,6 +246,9 @@ export function Viewer({
 
     const refPlanesGroup = new THREE.Group();
     scene.add(refPlanesGroup);
+
+    const connectorsGroup = new THREE.Group();
+    scene.add(connectorsGroup);
 
     const grid = new THREE.GridHelper(6000, 30, 0xcfccc4, 0xdedbd4);
     grid.rotation.x = Math.PI / 2;
@@ -412,8 +498,17 @@ export function Viewer({
     let cubeScene: THREE.Scene | null = null;
     let cubeCamera: THREE.PerspectiveCamera | null = null;
     let cubeMesh: THREE.Mesh | null = null;
+    let faceHighlightMesh: THREE.Mesh | null = null;
+    let cornerHighlightMesh: THREE.Mesh | null = null;
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
+
+    // Camera animation state for smooth Revit transition
+    let animStartPos = new THREE.Vector3();
+    let animEndPos = new THREE.Vector3();
+    let animStartTarget = new THREE.Vector3();
+    let animEndTarget = new THREE.Vector3();
+    let animProgress = 1; // 1 = done
 
     const createCubeMaterial = (text: string) => {
       const canvas = document.createElement("canvas");
@@ -421,54 +516,55 @@ export function Viewer({
       canvas.height = 256;
       const ctx = canvas.getContext("2d")!;
 
-      // Revit style smooth gradient background
-      const grad = ctx.createLinearGradient(0, 0, 0, 256);
-      grad.addColorStop(0, "#f8fafb");
-      grad.addColorStop(1, "#dce0e3");
-      ctx.fillStyle = grad;
+      // Neutral matte gray background like Revit ViewCube
+      ctx.fillStyle = "#8a8f94";
       ctx.fillRect(0, 0, 256, 256);
 
-      // Inner soft highlight
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
-      ctx.lineWidth = 6;
-      ctx.strokeRect(6, 6, 244, 244);
-
-      // Clean crisp Revit border
-      ctx.strokeStyle = "#828c94";
+      // Subtle top/left light bevel
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.45)";
       ctx.lineWidth = 4;
-      ctx.strokeRect(2, 2, 252, 252);
+      ctx.beginPath();
+      ctx.moveTo(2, 254);
+      ctx.lineTo(2, 2);
+      ctx.lineTo(254, 2);
+      ctx.stroke();
 
-      // Text styling
-      ctx.fillStyle = "#1e2226";
-      ctx.font = "bold 38px 'Segoe UI', Arial, sans-serif";
+      // Clean Revit border
+      ctx.strokeStyle = "#5f656a";
+      ctx.lineWidth = 3;
+      ctx.strokeRect(1, 1, 254, 254);
+
+      // Revit typography: italic sans-serif bold, subtle dark ink
+      ctx.fillStyle = "#2c3034";
+      ctx.font = "italic bold 42px 'Segoe UI', Arial, sans-serif";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.letterSpacing = "1.5px";
       ctx.fillText(text, 128, 128);
 
       const texture = new THREE.CanvasTexture(canvas);
       texture.anisotropy = 4;
       return new THREE.MeshStandardMaterial({
         map: texture,
-        roughness: 0.25,
+        roughness: 0.55,
         metalness: 0.1,
       });
     };
 
     if (cubeHost) {
       cubeRenderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
-      cubeRenderer.setSize(95, 95);
+      cubeRenderer.setSize(110, 110);
       cubeRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
       cubeRenderer.setClearColor(0x000000, 0); // 100% transparent background
       cubeHost.appendChild(cubeRenderer.domElement);
 
       cubeScene = new THREE.Scene();
-      cubeScene.add(new THREE.AmbientLight(0xffffff, 1.3));
-      const cubeLight = new THREE.DirectionalLight(0xffffff, 1.5);
+      cubeScene.add(new THREE.AmbientLight(0xffffff, 1.4));
+      const cubeLight = new THREE.DirectionalLight(0xffffff, 1.2);
       cubeLight.position.set(4, -5, 6);
       cubeScene.add(cubeLight);
 
-      cubeCamera = new THREE.PerspectiveCamera(36, 1, 0.1, 100);
+      // Camera FOV 42 with distance 6.2 ensures large ring and cube never get clipped
+      cubeCamera = new THREE.PerspectiveCamera(42, 1, 0.1, 100);
       cubeCamera.up.set(0, 0, 1);
 
       // Face order in BoxGeometry: +X (Right), -X (Left), +Y (Back), -Y (Front), +Z (Top), -Z (Bottom)
@@ -488,9 +584,35 @@ export function Viewer({
       // Add crisp edges to the cube
       const cubeEdges = new THREE.LineSegments(
         new THREE.EdgesGeometry(geometry),
-        new THREE.LineBasicMaterial({ color: 0x454d55, linewidth: 1.5 })
+        new THREE.LineBasicMaterial({ color: 0x5a6066, linewidth: 1 })
       );
       cubeScene.add(cubeEdges);
+
+      // Revit blue face highlight overlay (shows on click/hover face)
+      const faceHighlightGeom = new THREE.PlaneGeometry(1.65, 1.65);
+      const faceHighlightMat = new THREE.MeshBasicMaterial({
+        color: 0x50a6ff,
+        transparent: true,
+        opacity: 0.45,
+        depthTest: false,
+      });
+      faceHighlightMesh = new THREE.Mesh(faceHighlightGeom, faceHighlightMat);
+      faceHighlightMesh.visible = false;
+      faceHighlightMesh.renderOrder = 999;
+      cubeScene.add(faceHighlightMesh);
+
+      // Revit corner highlight overlay (shows on click corner)
+      const cornerHighlightGeom = new THREE.BoxGeometry(0.55, 0.55, 0.55);
+      const cornerHighlightMat = new THREE.MeshBasicMaterial({
+        color: 0x50a6ff,
+        transparent: true,
+        opacity: 0.55,
+        depthTest: false,
+      });
+      cornerHighlightMesh = new THREE.Mesh(cornerHighlightGeom, cornerHighlightMat);
+      cornerHighlightMesh.visible = false;
+      cornerHighlightMesh.renderOrder = 999;
+      cubeScene.add(cornerHighlightMesh);
 
       // Compass Ring with S, E, N, W (Z is UP, X is Right, Y is Front(-Y)/Back(+Y))
       const compassCanvas = document.createElement("canvas");
@@ -499,45 +621,39 @@ export function Viewer({
       const cCtx = compassCanvas.getContext("2d")!;
       cCtx.clearRect(0, 0, 512, 512);
 
-      // Outer ring
+      // Outer ring band (larger ring around the cube as in Revit)
       cCtx.beginPath();
-      cCtx.arc(256, 256, 218, 0, Math.PI * 2);
-      cCtx.lineWidth = 26;
-      cCtx.strokeStyle = "#808a93";
+      cCtx.arc(256, 256, 222, 0, Math.PI * 2);
+      cCtx.lineWidth = 44;
+      cCtx.strokeStyle = "rgba(65, 70, 75, 0.7)";
       cCtx.stroke();
 
-      // Inner ring line
+      // Inner ring thin contour
       cCtx.beginPath();
-      cCtx.arc(256, 256, 204, 0, Math.PI * 2);
-      cCtx.lineWidth = 2;
-      cCtx.strokeStyle = "rgba(255, 255, 255, 0.7)";
+      cCtx.arc(256, 256, 198, 0, Math.PI * 2);
+      cCtx.lineWidth = 1.5;
+      cCtx.strokeStyle = "rgba(255, 255, 255, 0.4)";
       cCtx.stroke();
 
-      // Outer ring line
-      cCtx.beginPath();
-      cCtx.arc(256, 256, 232, 0, Math.PI * 2);
-      cCtx.lineWidth = 2;
-      cCtx.strokeStyle = "rgba(255, 255, 255, 0.7)";
-      cCtx.stroke();
-
-      // Cardinal direction letters (N, S, E, W)
+      // Cardinal direction letters (N, S, E, W) - crisp light gray
       cCtx.fillStyle = "#ffffff";
-      cCtx.font = "bold 32px 'Segoe UI', Arial, sans-serif";
+      cCtx.font = "bold 46px 'Segoe UI', Arial, sans-serif";
       cCtx.textAlign = "center";
       cCtx.textBaseline = "middle";
 
       // N is towards +Y (top of canvas)
-      cCtx.fillText("N", 256, 256 - 218);
+      cCtx.fillText("N", 256, 256 - 222);
       // S is towards -Y (bottom of canvas)
-      cCtx.fillText("S", 256, 256 + 218);
+      cCtx.fillText("S", 256, 256 + 222);
       // E is towards +X (right of canvas)
-      cCtx.fillText("E", 256 + 218, 256);
+      cCtx.fillText("E", 256 + 222, 256);
       // W is towards -X (left of canvas)
-      cCtx.fillText("W", 256 - 218, 256);
+      cCtx.fillText("W", 256 - 222, 256);
 
       const compassTexture = new THREE.CanvasTexture(compassCanvas);
       compassTexture.anisotropy = 4;
-      const compassGeom = new THREE.PlaneGeometry(3.6, 3.6);
+      // Larger diameter compass plane (4.3 vs 3.6)
+      const compassGeom = new THREE.PlaneGeometry(4.3, 4.3);
       const compassMat = new THREE.MeshBasicMaterial({
         map: compassTexture,
         transparent: true,
@@ -548,11 +664,11 @@ export function Viewer({
       cubeScene.add(compassMesh);
 
       // 8 Interactive Corners for ISO/Perspective views
-      const cornerGeom = new THREE.BoxGeometry(0.48, 0.48, 0.48);
+      const cornerGeom = new THREE.BoxGeometry(0.5, 0.5, 0.5);
       const cornerMat = new THREE.MeshBasicMaterial({
         color: 0x9fbcd1,
         transparent: true,
-        opacity: 0.5,
+        opacity: 0.01, // Invisible click targets normally, highlight mesh appears on click
       });
 
       const corners: { mesh: THREE.Mesh; view: "tfr" | "tfl" | "tbr" | "tbl" | "bfr" | "bfl" | "bbr" | "bbl" }[] = [
@@ -580,6 +696,113 @@ export function Viewer({
         cubeScene.add(c.mesh);
       }
 
+      // Smooth camera transition function
+      const smoothTransitionTo = (targetPos: THREE.Vector3, targetLook: THREE.Vector3) => {
+        animStartPos.copy(camera.position);
+        animEndPos.copy(targetPos);
+        animStartTarget.copy(controls.target);
+        animEndTarget.copy(targetLook);
+        animProgress = 0; // Trigger smooth animation in tick()
+      };
+
+      const calculateViewCameraPos = (direction: "top" | "front" | "back" | "left" | "right" | "iso" | "tfr" | "tfl" | "tbr" | "tbl" | "bfr" | "bfl" | "bbr" | "bbl") => {
+        const current = modelRef.current;
+        if (!current?.bounds) return null;
+        const { min, max } = current.bounds;
+        const center = new THREE.Vector3((min.x + max.x) / 2, (min.y + max.y) / 2, (min.z + max.z) / 2);
+        const radius = Math.max(
+          new THREE.Vector3(max.x - min.x, max.y - min.y, max.z - min.z).length() / 2,
+          120,
+        );
+        const distance = (radius / Math.sin((camera.fov * Math.PI) / 360)) * 1.15;
+        const dCorner = distance * 0.7;
+
+        let offset = new THREE.Vector3();
+        switch (direction) {
+          case "top": offset.set(0, -0.001, distance); break;
+          case "front": offset.set(0, -distance, 0); break;
+          case "back": offset.set(0, distance, 0); break;
+          case "left": offset.set(-distance, 0, 0); break;
+          case "right": offset.set(distance, 0, 0); break;
+          case "tfr":
+          case "iso": offset.set(dCorner, -dCorner, dCorner * 0.8); break;
+          case "tfl": offset.set(-dCorner, -dCorner, dCorner * 0.8); break;
+          case "tbr": offset.set(dCorner, dCorner, dCorner * 0.8); break;
+          case "tbl": offset.set(-dCorner, dCorner, dCorner * 0.8); break;
+          case "bfr": offset.set(dCorner, -dCorner, -dCorner * 0.5); break;
+          case "bfl": offset.set(-dCorner, -dCorner, -dCorner * 0.5); break;
+          case "bbr": offset.set(dCorner, dCorner, -dCorner * 0.5); break;
+          case "bbl": offset.set(-dCorner, dCorner, -dCorner * 0.5); break;
+          default: offset.set(distance * 0.7, -distance * 0.7, distance * 0.55); break;
+        }
+        return { pos: center.clone().add(offset), center };
+      };
+
+      const updateHighlightByRay = () => {
+        if (!cubeCamera) return;
+        raycaster.setFromCamera(mouse, cubeCamera);
+
+        // Check corners hover
+        for (const c of corners) {
+          const hits = raycaster.intersectObject(c.mesh);
+          if (hits.length > 0) {
+            if (cornerHighlightMesh) {
+              cornerHighlightMesh.position.copy(c.mesh.position);
+              cornerHighlightMesh.visible = true;
+            }
+            if (faceHighlightMesh) faceHighlightMesh.visible = false;
+            return;
+          }
+        }
+        if (cornerHighlightMesh) cornerHighlightMesh.visible = false;
+
+        // Check face hover
+        if (cubeMesh) {
+          const intersects = raycaster.intersectObject(cubeMesh);
+          if (intersects.length > 0 && intersects[0].face) {
+            const index = Math.floor(intersects[0].face.materialIndex);
+            if (faceHighlightMesh) {
+              faceHighlightMesh.position.set(0, 0, 0);
+              faceHighlightMesh.rotation.set(0, 0, 0);
+              if (index === 0) { // Right (+X)
+                faceHighlightMesh.position.set(1.01, 0, 0);
+                faceHighlightMesh.rotation.y = Math.PI / 2;
+              } else if (index === 1) { // Left (-X)
+                faceHighlightMesh.position.set(-1.01, 0, 0);
+                faceHighlightMesh.rotation.y = -Math.PI / 2;
+              } else if (index === 2) { // Back (+Y)
+                faceHighlightMesh.position.set(0, 1.01, 0);
+                faceHighlightMesh.rotation.x = -Math.PI / 2;
+              } else if (index === 3) { // Front (-Y)
+                faceHighlightMesh.position.set(0, -1.01, 0);
+                faceHighlightMesh.rotation.x = Math.PI / 2;
+              } else if (index === 4) { // Top (+Z)
+                faceHighlightMesh.position.set(0, 0, 1.01);
+              } else if (index === 5) { // Bottom (-Z)
+                faceHighlightMesh.position.set(0, 0, -1.01);
+                faceHighlightMesh.rotation.x = Math.PI;
+              }
+              faceHighlightMesh.visible = true;
+            }
+            return;
+          }
+        }
+        if (faceHighlightMesh) faceHighlightMesh.visible = false;
+      };
+
+      const onCubeMouseMove = (event: MouseEvent) => {
+        if (!cubeRenderer) return;
+        const rect = cubeRenderer.domElement.getBoundingClientRect();
+        mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+        mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+        updateHighlightByRay();
+      };
+
+      const onCubeMouseLeave = () => {
+        if (faceHighlightMesh) faceHighlightMesh.visible = false;
+        if (cornerHighlightMesh) cornerHighlightMesh.visible = false;
+      };
+
       const onCubeClick = (event: MouseEvent) => {
         if (!cubeRenderer) return;
         const rect = cubeRenderer.domElement.getBoundingClientRect();
@@ -593,7 +816,9 @@ export function Viewer({
           for (const c of corners) {
             const hits = raycaster.intersectObject(c.mesh);
             if (hits.length > 0) {
-              setView(c.view);
+              const target = calculateViewCameraPos(c.view);
+              if (target) smoothTransitionTo(target.pos, target.center);
+              else setView(c.view);
               return;
             }
           }
@@ -610,31 +835,56 @@ export function Viewer({
                 "top",
                 "iso",
               ];
-              setView(viewMap[index] || "iso");
+
+              const target = calculateViewCameraPos(viewMap[index] || "iso");
+              if (target) smoothTransitionTo(target.pos, target.center);
+              else setView(viewMap[index] || "iso");
             }
           }
         }
       };
 
+      cubeRenderer.domElement.addEventListener("mousemove", onCubeMouseMove);
+      cubeRenderer.domElement.addEventListener("mouseleave", onCubeMouseLeave);
       cubeRenderer.domElement.addEventListener("click", onCubeClick);
     }
 
     const tick = () => {
       frame = requestAnimationFrame(tick);
+      
+      // Smooth camera transition when user clicks ViewCube - slower, cinematic & silky smooth (~800ms)
+      if (animProgress < 1) {
+        animProgress = Math.min(1, animProgress + 0.02); // 0.02 step = ~50 frames (~800ms)
+        // Quintic ease-out formula for super smooth, gentle glide into position
+        const t = animProgress - 1;
+        const ease = t * t * t * t * t + 1;
+        camera.position.lerpVectors(animStartPos, animEndPos, ease);
+        controls.target.lerpVectors(animStartTarget, animEndTarget, ease);
+        controls.update();
+      }
+
+      // Auto-turntable exhibition rotation when building/generating model or toggled by user button
+      if (statusRef.current || turntableRef.current) {
+        controls.autoRotate = true;
+        controls.autoRotateSpeed = 0.35; // Gentle, cinematic exhibition turntable speed
+      } else {
+        controls.autoRotate = false;
+      }
+
       controls.update();
       renderer.render(scene, camera);
 
       if (cubeRenderer && cubeScene && cubeCamera) {
         // Sync cube camera rotation with main scene camera
         const dir = camera.position.clone().sub(controls.target).normalize();
-        cubeCamera.position.copy(dir.multiplyScalar(4.6));
+        cubeCamera.position.copy(dir.multiplyScalar(6.2)); // Distance 6.2 accommodates larger compass ring without clipping
         cubeCamera.lookAt(0, 0, 0);
         cubeRenderer.render(cubeScene, cubeCamera);
       }
     };
     tick();
 
-    stateRef.current = { renderer, scene, camera, controls, content, handlesGroup, grid, refPlanesGroup, disposables: [] };
+    stateRef.current = { renderer, scene, camera, controls, content, handlesGroup, grid, refPlanesGroup, connectorsGroup, disposables: [] };
 
     return () => {
       cancelAnimationFrame(frame);
@@ -752,7 +1002,10 @@ export function Viewer({
     });
     state.disposables.push(edgeMaterial);
 
-    for (const part of model.parts) {
+    const limitParts = visiblePartCount > 0 ? visiblePartCount : model.parts.length;
+    const partsToRender = model.parts.slice(0, limitParts);
+
+    for (const part of partsToRender) {
       if (hiddenPartIds.includes(part.id)) {
         continue;
       }
@@ -763,41 +1016,48 @@ export function Viewer({
       const color = partColor(part, materials);
       const props = partMaterialProps(part, materials);
 
+      const isClearance = part.id.toLowerCase().includes("clearance") || part.name.toLowerCase().includes("clearance");
       const isSelected = part.id === selectedPartId;
-      const isTransparent = transparentPartIds.includes(part.id);
-      const highlightColor = 0x2b8aef; // Revit Selection Blue
-      const key = `${color}|${props.metalness}|${props.roughness}|${isTransparent ? "trans" : "solid"}`;
+      const isTransparent = transparentPartIds.includes(part.id) || isClearance;
+      const key = `${color}|${props.metalness}|${props.roughness}|${isTransparent ? (isClearance ? "clearance" : "trans") : "solid"}`;
 
-      let material = isSelected
-        ? new THREE.MeshStandardMaterial({
-            color: highlightColor,
-            metalness: 0.2,
-            roughness: 0.3,
+      const activeOpacity = isTransparent ? (isClearance ? 0.22 : 0.35) : 1.0;
+
+      let material: THREE.MeshStandardMaterial;
+
+      if (isSelected) {
+        // Giữ màu gốc của part, chỉ làm mờ/bán trong suốt (translucent) nhẹ kèm viền xanh nổi bật
+        material = new THREE.MeshStandardMaterial({
+          color: new THREE.Color(color),
+          metalness: Math.max(0.1, props.metalness),
+          roughness: Math.max(0.2, props.roughness),
+          transparent: true,
+          opacity: 0.55, // Mờ nhẹ thanh thoát
+          depthWrite: false,
+          polygonOffset: true,
+          polygonOffsetFactor: -1,
+          polygonOffsetUnits: -1,
+        });
+        state.disposables.push(material);
+      } else {
+        let cached = materialCache.get(key);
+        if (!cached) {
+          cached = new THREE.MeshStandardMaterial({
+            color: new THREE.Color(color),
+            metalness: props.metalness,
+            roughness: props.roughness,
             transparent: isTransparent,
-            opacity: isTransparent ? 0.35 : 1.0,
+            opacity: activeOpacity,
             depthWrite: !isTransparent,
             polygonOffset: true,
             polygonOffsetFactor: 1,
             polygonOffsetUnits: 1,
-          })
-        : materialCache.get(key);
-
-      if (!material) {
-        material = new THREE.MeshStandardMaterial({
-          color: new THREE.Color(color),
-          metalness: props.metalness,
-          roughness: props.roughness,
-          transparent: isTransparent,
-          opacity: isTransparent ? 0.35 : 1.0,
-          depthWrite: !isTransparent,
-          polygonOffset: true,
-          polygonOffsetFactor: 1,
-          polygonOffsetUnits: 1,
-        });
-        materialCache.set(key, material);
-        state.disposables.push(material);
+          });
+          materialCache.set(key, cached);
+          state.disposables.push(cached);
+        }
+        material = cached;
       }
-      if (isSelected) state.disposables.push(material);
 
       let edges: THREE.LineSegments | null = null;
       if (part.cuts.length === 0) {
@@ -805,10 +1065,10 @@ export function Viewer({
         state.disposables.push(edgeGeometry);
         const thisEdgeMat = isSelected
           ? new THREE.LineBasicMaterial({
-              color: 0x005fb8,
+              color: 0x0078d4, // Viền xanh Revit sắc nét bao quanh part đang chọn
               linewidth: 2,
-              transparent: isTransparent,
-              opacity: isTransparent ? 0.4 : 1.0,
+              transparent: false,
+              opacity: 1.0,
             })
           : isTransparent
           ? new THREE.LineBasicMaterial({
@@ -856,127 +1116,153 @@ export function Viewer({
     state.handlesGroup.clear();
 
     // Shape Handles (Revit Blue Arrows for Direct Dimension Manipulation)
-    if (model.bounds) {
-      const { min, max } = model.bounds;
-      const center = new THREE.Vector3(
-        (min.x + max.x) / 2,
-        (min.y + max.y) / 2,
-        (min.z + max.z) / 2,
-      );
-      const sizeX = max.x - min.x;
-      const sizeY = max.y - min.y;
-      const sizeZ = max.z - min.z;
+    state.handlesGroup.clear();
 
-      // Find best-matching dimension parameters for X, Y, Z
-      const findParamForAxis = (keywords: string[], fallbackName: string, fallbackVal: number) => {
-        const found = parameters.find(p =>
-          keywords.some(k => p.name.toLowerCase().includes(k.toLowerCase())) &&
-          typeof p.value === "number",
+    // Hiện handle khi người dùng click chọn 1 Part cụ thể
+    const selectedPart = selectedPartId && model ? model.parts.find((p) => p.id === selectedPartId) : null;
+
+    if (selectedPart) {
+      state.handlesGroup.visible = true;
+
+      // Tính bounds riêng của Part đang được chọn
+      const { geometry: partGeom } = buildPartGeometry(selectedPart);
+      partGeom.computeBoundingBox();
+      const pBox = partGeom.boundingBox;
+
+      if (pBox) {
+        const center = new THREE.Vector3(
+          (pBox.min.x + pBox.max.x) / 2,
+          (pBox.min.y + pBox.max.y) / 2,
+          (pBox.min.z + pBox.max.z) / 2,
         );
-        return {
-          name: found ? found.name : fallbackName,
-          val: found && typeof found.value === "number" ? found.value : fallbackVal,
-        };
-      };
+        const sizeX = Math.max(pBox.max.x - pBox.min.x, 10);
+        const sizeY = Math.max(pBox.max.y - pBox.min.y, 10);
+        const sizeZ = Math.max(pBox.max.z - pBox.min.z, 10);
+        const minDimension = Math.min(sizeX, sizeY, sizeZ);
 
-      const xParam = findParamForAxis(["casing length", "length", "width"], "Casing Length", sizeX);
-      const yParam = findParamForAxis(["casing depth", "depth"], "Casing Depth", sizeY);
-      const zParam = findParamForAxis(["casing height", "height"], "Casing Height", sizeZ);
+        // Auto-scale shape handles to fit part size
+        const scaleFactor = Math.min(1.0, Math.max(0.18, minDimension / 500));
 
-      const createShapeHandle = (
-        pos: THREE.Vector3,
-        dir: THREE.Vector3,
-        axis: "x" | "y" | "z",
-        sign: number,
-        paramInfo: { name: string; val: number },
-      ) => {
-        const handle = new THREE.Group();
-        handle.position.copy(pos);
-
-        // Arrow cone: pointing in `dir`
-        const arrowLength = 90;
-        const arrowHead = 120;
-        const arrowRadius = 40;
-
-        const coneGeom = new THREE.ConeGeometry(arrowRadius, arrowHead, 16);
-        coneGeom.translate(0, arrowHead / 2 + arrowLength, 0);
-
-        const stemGeom = new THREE.CylinderGeometry(14, 14, arrowLength, 12);
-        stemGeom.translate(0, arrowLength / 2, 0);
-
-        const handleMat = new THREE.MeshStandardMaterial({
-          color: 0x1976d2, // Revit blue shape handle
-          roughness: 0.2,
-          metalness: 0.1,
-          depthTest: false,
-        });
-        state.disposables.push(coneGeom, stemGeom, handleMat);
-
-        const coneMesh = new THREE.Mesh(coneGeom, handleMat);
-        const stemMesh = new THREE.Mesh(stemGeom, handleMat);
-        coneMesh.renderOrder = 999;
-        stemMesh.renderOrder = 999;
-
-        // Align from (0, 1, 0) to `dir`
-        const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
-        handle.quaternion.copy(q);
-
-        handle.add(coneMesh);
-        handle.add(stemMesh);
-
-        handle.userData = {
-          isShapeHandle: true,
-          axis,
-          dir: sign,
-          paramName: paramInfo.name,
-          currentVal: paramInfo.val,
+        // Tìm parameter phù hợp nhất với Part đang chọn
+        const partNameKeywords = selectedPart.name.toLowerCase().split(/\s+/);
+        const findParamForPartAxis = (axisKeywords: string[], fallbackName: string, fallbackVal: number) => {
+          // Ưu tiên param có chứa cả tên part lẫn keyword trục (vd: Casing Length, Flange Thickness,...)
+          const exactMatch = parameters.find((p) =>
+            partNameKeywords.some((pk) => pk.length > 2 && p.name.toLowerCase().includes(pk)) &&
+            axisKeywords.some((ak) => p.name.toLowerCase().includes(ak.toLowerCase())) &&
+            typeof p.value === "number",
+          );
+          if (exactMatch && typeof exactMatch.value === "number") {
+            return { name: exactMatch.name, val: exactMatch.value };
+          }
+          const axisMatch = parameters.find((p) =>
+            axisKeywords.some((ak) => p.name.toLowerCase().includes(ak.toLowerCase())) &&
+            typeof p.value === "number",
+          );
+          return {
+            name: axisMatch ? axisMatch.name : fallbackName,
+            val: axisMatch && typeof axisMatch.value === "number" ? axisMatch.value : fallbackVal,
+          };
         };
 
-        state.handlesGroup.add(handle);
-      };
+        const xParam = findParamForPartAxis(["length", "width", "od", "diameter", "radius"], `${selectedPart.name} X`, sizeX);
+        const yParam = findParamForPartAxis(["depth", "width", "od", "diameter", "radius"], `${selectedPart.name} Y`, sizeY);
+        const zParam = findParamForPartAxis(["height", "thickness", "length"], `${selectedPart.name} Z`, sizeZ);
 
-      // +X handle (Right)
-      createShapeHandle(
-        new THREE.Vector3(max.x, center.y, center.z),
-        new THREE.Vector3(1, 0, 0),
-        "x",
-        1,
-        xParam,
-      );
-      // -X handle (Left)
-      createShapeHandle(
-        new THREE.Vector3(min.x, center.y, center.z),
-        new THREE.Vector3(-1, 0, 0),
-        "x",
-        -1,
-        xParam,
-      );
+        const createShapeHandle = (
+          pos: THREE.Vector3,
+          dir: THREE.Vector3,
+          axis: "x" | "y" | "z",
+          sign: number,
+          paramInfo: { name: string; val: number },
+        ) => {
+          const handle = new THREE.Group();
+          handle.position.copy(pos);
 
-      // +Y handle (Back)
-      createShapeHandle(
-        new THREE.Vector3(center.x, max.y, center.z),
-        new THREE.Vector3(0, 1, 0),
-        "y",
-        1,
-        yParam,
-      );
-      // -Y handle (Front)
-      createShapeHandle(
-        new THREE.Vector3(center.x, min.y, center.z),
-        new THREE.Vector3(0, -1, 0),
-        "y",
-        -1,
-        yParam,
-      );
+          const arrowLength = 70 * scaleFactor;
+          const arrowHead = 95 * scaleFactor;
+          const arrowRadius = 32 * scaleFactor;
 
-      // +Z handle (Top)
-      createShapeHandle(
-        new THREE.Vector3(center.x, center.y, max.z),
-        new THREE.Vector3(0, 0, 1),
-        "z",
-        1,
-        zParam,
-      );
+          const coneGeom = new THREE.ConeGeometry(arrowRadius, arrowHead, 16);
+          coneGeom.translate(0, arrowHead / 2 + arrowLength, 0);
+
+          const stemGeom = new THREE.CylinderGeometry(11 * scaleFactor, 11 * scaleFactor, arrowLength, 12);
+          stemGeom.translate(0, arrowLength / 2, 0);
+
+          const handleMat = new THREE.MeshStandardMaterial({
+            color: 0x0078d4, // Revit blue handle
+            roughness: 0.2,
+            metalness: 0.2,
+            depthTest: false,
+          });
+          state.disposables.push(coneGeom, stemGeom, handleMat);
+
+          const coneMesh = new THREE.Mesh(coneGeom, handleMat);
+          const stemMesh = new THREE.Mesh(stemGeom, handleMat);
+          coneMesh.renderOrder = 999;
+          stemMesh.renderOrder = 999;
+
+          const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
+          handle.quaternion.copy(q);
+
+          handle.add(coneMesh);
+          handle.add(stemMesh);
+
+          handle.userData = {
+            isShapeHandle: true,
+            axis,
+            dir: sign,
+            paramName: paramInfo.name,
+            currentVal: paramInfo.val,
+          };
+
+          state.handlesGroup.add(handle);
+        };
+
+        // +X handle
+        createShapeHandle(
+          new THREE.Vector3(pBox.max.x, center.y, center.z),
+          new THREE.Vector3(1, 0, 0),
+          "x",
+          1,
+          xParam,
+        );
+        // -X handle
+        createShapeHandle(
+          new THREE.Vector3(pBox.min.x, center.y, center.z),
+          new THREE.Vector3(-1, 0, 0),
+          "x",
+          -1,
+          xParam,
+        );
+        // +Y handle
+        createShapeHandle(
+          new THREE.Vector3(center.x, pBox.max.y, center.z),
+          new THREE.Vector3(0, 1, 0),
+          "y",
+          1,
+          yParam,
+        );
+        // -Y handle
+        createShapeHandle(
+          new THREE.Vector3(center.x, pBox.min.y, center.z),
+          new THREE.Vector3(0, -1, 0),
+          "y",
+          -1,
+          yParam,
+        );
+        // +Z handle
+        createShapeHandle(
+          new THREE.Vector3(center.x, center.y, pBox.max.z),
+          new THREE.Vector3(0, 0, 1),
+          "z",
+          1,
+          zParam,
+        );
+      }
+      partGeom.dispose();
+    } else {
+      state.handlesGroup.visible = false;
     }
 
     if (showPlanes && model.bounds) {
@@ -1042,12 +1328,81 @@ export function Viewer({
       state.disposables.push(zLineGeom);
     }
 
+    // -------------------------------------------------------------
+    // MEP Connectors 3D Symbols (Revit Style Flow Arrows & Rings)
+    // -------------------------------------------------------------
+    state.connectorsGroup.clear();
+    state.connectorsGroup.visible = Boolean(showConnectors);
+
+    if (showConnectors && model.connectors && model.connectors.length > 0) {
+      for (const conn of model.connectors) {
+        const connGroup = new THREE.Group();
+        connGroup.position.set(conn.origin.x, conn.origin.y, conn.origin.z);
+
+        // System color mapping
+        let colorHex = 0x0969da; // Default Blue
+        if (conn.systemType.includes("SupplyAir")) colorHex = 0x1f883d; // Green
+        else if (conn.systemType.includes("ReturnAir")) colorHex = 0xd9381e; // Red/Magenta
+        else if (conn.systemType.includes("HydronicSupply")) colorHex = 0x0969da; // Blue
+        else if (conn.systemType.includes("HydronicReturn")) colorHex = 0xd47600; // Orange
+        else if (conn.systemType.includes("Sanitary")) colorHex = 0x8250df; // Purple
+
+        const arrowDir = new THREE.Vector3(
+          conn.directionVector.x,
+          conn.directionVector.y,
+          conn.directionVector.z
+        ).normalize();
+
+        // Connector Boundary Rim / Ring
+        if (conn.shape === "round") {
+          const radius = (conn.diameter || 50) / 2;
+          const torusGeom = new THREE.TorusGeometry(radius, 4, 12, 32);
+          const torusMat = new THREE.MeshBasicMaterial({ color: colorHex });
+          state.disposables.push(torusGeom, torusMat);
+          const torus = new THREE.Mesh(torusGeom, torusMat);
+
+          // Align torus normal with arrow direction
+          const defaultNormal = new THREE.Vector3(0, 0, 1);
+          const quat = new THREE.Quaternion().setFromUnitVectors(defaultNormal, arrowDir);
+          torus.quaternion.copy(quat);
+          connGroup.add(torus);
+        } else {
+          const w = conn.width || 200;
+          const h = conn.height || 200;
+          const rectGeom = new THREE.BoxGeometry(w, h, 6);
+          const rectEdges = new THREE.LineSegments(
+            new THREE.EdgesGeometry(rectGeom),
+            new THREE.LineBasicMaterial({ color: colorHex, linewidth: 2 })
+          );
+          state.disposables.push(rectGeom);
+          const defaultNormal = new THREE.Vector3(0, 0, 1);
+          const quat = new THREE.Quaternion().setFromUnitVectors(defaultNormal, arrowDir);
+          rectEdges.quaternion.copy(quat);
+          connGroup.add(rectEdges);
+        }
+
+        // Flow Arrow helper
+        const arrowLength = 70;
+        const arrowHelper = new THREE.ArrowHelper(
+          arrowDir,
+          new THREE.Vector3(0, 0, 0),
+          arrowLength,
+          colorHex,
+          24,
+          16
+        );
+        connGroup.add(arrowHelper);
+
+        state.connectorsGroup.add(connGroup);
+      }
+    }
+
     const initialLoad = !hasFittedRef.current;
     if (initialLoad) {
       fit();
       hasFittedRef.current = true;
     }
-  }, [model, parameters, materials, showGrid, showPlanes, selectedPartId, hiddenPartIds, transparentPartIds, fit]);
+  }, [model, parameters, materials, showGrid, showPlanes, showConnectors, selectedPartId, hiddenPartIds, transparentPartIds, visiblePartCount, fit]);
 
   const dims = formatDimensions(model?.bounds ?? null, units);
 
@@ -1086,6 +1441,31 @@ export function Viewer({
             Ref Planes
           </button>
         )}
+        {onToggleConnectors && (
+          <button
+            type="button"
+            className={`tool ${showConnectors ? "active" : ""}`}
+            onClick={onToggleConnectors}
+            title="Toggle MEP Connectors (Cổng kết nối Cơ điện & Mũi tên hướng dòng chảy)"
+          >
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
+              <circle cx="8" cy="8" r="6" />
+              <path d="M8 4v8M5 7l3-3 3 3" />
+            </svg>
+            Connectors
+          </button>
+        )}
+        <button
+          type="button"
+          className={`tool ${turntableActive ? "active" : ""}`}
+          onClick={() => setTurntableActive((curr) => !curr)}
+          title="Bật/Tắt hiệu ứng xoay tròn 360° tự động như bàn xoay trưng bày (Turntable)"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
+          </svg>
+          Turntable
+        </button>
         {hiddenPartIds.length > 0 && onUnhideAll && (
           <button
             type="button"
@@ -1102,7 +1482,7 @@ export function Viewer({
         )}
       </div>
 
-      <div className="viewer-dims">{dims}</div>
+      {dims && <div className="viewer-dims">{dims}</div>}
 
       <div className="viewcube-container" ref={cubeHostRef} title="Click a face to align view" />
 
@@ -1283,6 +1663,13 @@ export function Viewer({
               )}
             </>
           )}
+        </div>
+      )}
+
+      {animatingPartName && (
+        <div className="viewer-assembly-badge">
+          <span className="assembly-pulse" />
+          <span>Assembling: <strong>{animatingPartName}</strong> ({visiblePartCount}/{model?.parts.length})</span>
         </div>
       )}
 

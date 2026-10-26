@@ -52,78 +52,38 @@ Rules that keep the model clean:
 - Give every part a `material` name and declare the materials array with a hex colour, roughness and metalness so the 3D preview looks right.
 - Metal casing: colour #b9bec2, metalness 0.35, roughness 0.55. Copper pipe: #b87333. Dark machinery / motor / fan scroll: #4b5257. Filter media: #cfc3a8. Electrical box: #2f363d. Galvanized trim / flange: #9aa1a6.
 
-## Tiêu chuẩn Dựng Family Sử dụng được Trong Dự án Thực tế (Usable & Production-Ready Family)
+## Tiêu chuẩn Dựng Family LOD 300 Thực tế & Gọn nhẹ (Standard LOD 300 Family)
 
-Để file `.rfa` xuất ra từ bản vẽ kỹ thuật có thể cắm vào hệ thống MEP / Kiến trúc / Kết cấu và làm việc được ngay trong Revit theo chuẩn LOD 300 - 350:
+Mục tiêu cốt lõi: Tạo family chuẩn **LOD 300** đáp ứng thiết kế, định tuyến cơ điện MEP và xuất khối lượng, **tuyệt đối không làm nặng file Revit (No Over-modeling / No Micro-details)**:
+- **Số lượng parts**: Tối ưu từ **4 đến 16 parts** gọn gàng, rõ ràng.
+- **Không dựng các chi tiết siêu vi mô**: KHÔNG dựng từng vòng ren răng ốc (thread crests), không dựng từng bulông đai ốc li ti, không dựng hàng chục cánh tản nhiệt rời. Các chi tiết ren hay rãnh chỉ cần thể hiện bằng khối hình học bao chính và vật liệu.
+- **Tập trung vào 3 yếu tố quyết định của LOD 300**:
+  1. **Hình khối bao chính xác (Accurate Overall Boundary)**: Kích thước dài x rộng x cao, tỷ lệ chuẩn catalog.
+  2. **Cổng kết nối chuẩn vị trí (Accurate MEP Interfaces)**: Miệng gió, cổ bích, đầu ống cấp/hồi/xả nhô ra đúng vị trí và đường kính danh định để bắt ống gió/ống nước.
+  3. **Hệ thống tham số thông minh (Parametric Driving)**: Kích thước gắn với tham số trong group `Dimensions` để co dãn khi đổi Type.
 
 1. **Định hướng và Tâm tọa độ chuẩn (Origin & Hosting Orientation)**:
    - Tâm tọa độ `(X=0, Y=0)` tại sàn `Z=0` là giao điểm của 2 mặt phẳng tham chiếu gốc (Center Front/Back & Center Left/Right).
    - Thiết bị đặt sàn: đáy máy nằm đúng `Z = 0`.
-   - Thiết bị treo trần / ngang (như Horizontal FCU, AHU): hệ tai treo/lỗ treo ren `D × E` phải cân xứng qua tâm để khi đưa vào dự án gán cao độ trần (Offset from Level) là chính xác.
-   - Hướng nhìn chuẩn: Mặt thao tác/mặt thổi gió chính quay về hướng **Front (-Y)** hoặc hướng thổi quy ước.
+   - Thiết bị treo trần / ngang: tai treo hoặc tâm máy cân xứng qua trục gốc để khi đặt cao độ (Offset) chuẩn xác.
+   - Hướng nhìn chuẩn: Mặt thao tác/thổi gió chính quay về hướng **Front (-Y)**.
 
-2. **Khung gầm & Chi tiết Cơ khí Thực tế (Mechanical Rigidity & Mounting Details - LOD 350)**:
-   - **Đế máy / Chân đế (Base Channels / Mounting Rails)**:
-     * Máy đặt sàn hoặc treo trần đều phải có 2 thanh ray đế thép chữ U / C-channel hoặc 4 tai treo góc (Mounting Brackets) với kích thước rõ ràng.
-     * Thể hiện 4 lỗ bulông/lỗ ty treo định vị (Mounting Holes) với khoảng cách `D × E` chuẩn xác.
-   - **Tấm vỏ ghép & Nẹp gân tăng cứng (Casing Panels & Stiffeners)**:
-     * Vỏ ngoài chia panel ghép nối, cánh cửa thăm (Access Door/Hatch) có tay nắm (Handle) hoặc bản lề (Hinges) nổi rõ trên bề mặt.
-   - **Khay hứng nước ngưng (Condensate Drain Pan)**:
-     * Dựng khay hứng nước ngưng nằm bên dưới dàn lạnh, vát dốc dẫn nước hướng về phía đầu ống thoát xả (Drain Stub).
+2. **Cổng kết nối Cơ điện Chuẩn MEP (MEP Connectors & Interface Stubs)**:
+   - **Cổ bích miệng gió**: Khối hộp chữ nhật/ống tròn nhô ra 20-30mm đúng kích thước catalog.
+   - **Đầu ống kết nối (Piping Stubs)**: Khối trụ tròn `cylinder` nhô ra ngoài vỏ 50-80mm theo đường kính danh định DN. Không cần vẽ ren răng xoắn phức tạp, chỉ cần ống trơn đúng kích thước ngoài.
+   - **Hộp điện**: Khối hộp đơn giản gắn trên thân sườn.
 
-3. **Đầy đủ Cổng kết nối Cơ điện Chuẩn MEP (MEP Connectors & Interface Stubs)**:
-   - **Miệng gió Cấp / Hồi / Thải (Duct Openings & Flanges)**:
-     * Dựng nổi cổ bích (Flange/Collar) nhô ra ngoài vỏ 20-30mm với kích thước chuẩn catalog (ví dụ: `a2 × c2`, hoặc `a5 × c3`).
-     * Độ dày bích và gờ mép rõ ràng để sau này gắn Connector gió trong Revit ăn khớp với ống gió (Ductwork).
-     * Đặt tên rõ ràng: `Discharge Flange 1`, `Discharge Flange 2`, `Return Duct Collar`.
-   - **Đầu ống Nước / Ống Gas / Thoát nước (Piping Stubs)**:
-     * Mỗi đầu ống phải là 1 `cylinder` dạng ống tròn nhô hẳn ra ngoài vỏ máy với chiều dài tiêu chuẩn (60mm - 100mm) theo đúng đường kính danh định DN:
-       - Cấp / Hồi nước lạnh (Chilled Water Supply / Return): DN32, DN40, DN50... (G1).
-       - Cấp / Hồi sưởi (Hot Water Supply / Return): DN25, DN32... (G2).
-       - Ống thoát nước ngưng (Condensate Drain): DN25 (1") hoặc DN32 với đầu ren nhô ra sườn dưới.
-       - Cấp ẩm (Humidifier Supply): DN15 (1/2") nằm phía trên.
-     * Cổ ống nhô ra phải có đệm gioăng cao su hoặc bích đai viền ngoài (Escutcheon / Flange Ring) tiếp giáp vỏ máy.
-     * Tuyệt đối không để đầu ống chìm lỉm bên trong vỏ hoặc cắm ngược vào trong.
-   - **Hộp đấu nối điện & Bảng điều khiển (Electrical Junction Box & Control Panel)**:
-     * Hộp đấu dây điện nổi trên sườn máy (kích thước tối thiểu ~120x160x70mm) kèm lỗ luồn cáp nguồn / cáp tín hiệu (Cable Gland / Conduit Knockout).
-
-4. **Hệ thống Tham số Đầy đủ & Chuẩn hóa (Standard Parameter Architecture)**:
+3. **Hệ thống Tham số Đầy đủ & Chuẩn hóa (Standard Parameter Architecture)**:
    - Không được "hardcode" kích thước chết trong khối hình học.
-   - Toàn bộ kích thước quan trọng phải gắn với tham số thuộc group `Dimensions`:
-     * Kích thước bao chính: `Casing Length`, `Casing Depth`, `Casing Height`, `Overall Height`.
-     * Khoảng cách ty treo: `Mounting Spacing Length`, `Mounting Spacing Depth`.
-     * Kích thước miệng gió: `Discharge Width`, `Discharge Height`, `Return Width`, `Return Height`.
-     * Cỡ kết nối: `Cooling Pipe Size`, `Heating Pipe Size`, `Drain Pipe Size`.
-   - Tham số kỹ thuật MEP (thuộc group `Mechanical` / `Electrical` / `Plumbing`):
-     * Lưu lượng gió `Air Flow` (m3/h hoặc L/s hoặc CFM).
-     * Công suất lạnh `Cooling Capacity` (kW hoặc BTU/h).
-     * Cột áp quạt `External Static Pressure` (Pa).
-     * Điện áp `Electrical Voltage` (V) và Pha `Electrical Phase`.
+   - Toàn bộ kích thước quan trọng phải gắn với tham số thuộc group `Dimensions`.
+   - Tham số kỹ thuật MEP (thuộc group `Mechanical` / `Electrical` / `Plumbing`): Lưu lượng gió `Air Flow`, Công suất `Cooling Capacity`, Cột áp, Điện áp.
    - Thuộc tính nhận diện trong group `Identity Data`: `Manufacturer`, `Model`, `Family Description`.
-   - Nhờ đó, người dùng có thể đổi Type (ví dụ từ Model 080 sang Model 100) mà hình học tự động co dãn theo đúng catalog.
 
-5. **Tách biệt Vỏ ngoài và Cấu kiện Nội thất (Internal vs External Part Separation)**:
-   - Các bộ phận bên trong (Quạt ly tâm kép, Mô tơ kéo quạt, Dàn coil ống đồng cánh nhôm, Lưới lọc bụi Filter) phải được đặt đúng `id` và `name` chuyên biệt (ví dụ: `fan-scroll-1`, `fan-scroll-2`, `fan-motor`, `cooling-coil-bank`, `filter-pack`).
-   - Phải nằm trọn vẹn bên trong thể tích của vỏ máy, không được đâm xuyên lồi ra ngoài vỏ (ngoại trừ các miệng gió và cổ ống kết nối).
-   - Khi ở chế độ bình thường hoặc xuất Revit, vỏ ngoài che kín. Nhưng khi người dùng ẩn vỏ (Hide Casing) hoặc xem làm mờ (Ghost mode), các chi tiết bên trong hiển thị chân thực, đúng tỷ lệ kỹ thuật.
-
-6. **Vật liệu và Màu sắc Chân thực (Photorealistic & Technical Material Setup)**:
-   - Vỏ thép mạ kẽm (Galvanized Steel): `#b9bec2`, metalness 0.35, roughness 0.55.
-   - Ống đồng cánh nhôm (Copper Pipe / Coil): `#b87333`, metalness 0.85, roughness 0.3.
-   - Khung cánh coil / Lá tản nhiệt (Aluminum Fins): `#d8dcd6`, metalness 0.5, roughness 0.4.
-   - Cụm quạt ly tâm / vỏ quạt (Fan Housing): `#4b5257`, metalness 0.4, roughness 0.6.
-   - Động cơ quạt (Motor Cast Iron): `#23272a`, metalness 0.6, roughness 0.4.
-   - Màng lọc bụi (Air Filter Media): `#cfc3a8`, metalness 0.05, roughness 0.9.
-   - Hộp điện điều khiển (Electrical Enclosure): `#2f363d`, metalness 0.3, roughness 0.5.
-   - Khay ngưng nước xả (Drain Pan Stainless): `#8a9296`, metalness 0.7, roughness 0.3.
-   - Bích miệng gió (Flange Trim): `#9aa1a6`, metalness 0.45, roughness 0.45.
-
-7. **Quy trình Tự đối chiếu Đa chiều (Multi-View Cross-Check) trước khi xuất JSON**:
-   - Trước khi chốt spec, tự kiểm tra qua 3 hình chiếu:
-     * **Mặt bằng (TOP)**: Kích thước bao = `A × B`, 4 điểm treo = `D × E`, vị trí miệng gió hồi.
-     * **Mặt đứng (FRONT)**: Chiều ngang = `A`, chiều cao = `C`, 2 miệng gió thổi chuẩn `a2 × c2` cách nhau `a3` và cách mép trái `a4`. Hộp điện nằm bên phải.
-     * **Mặt cạnh (RIGHT)**: Chiều sâu = `B`, chiều cao = `C`, các đầu ống nhô ra sườn phải theo đúng thứ tự cao độ từ trên xuống (`c4, c5, c6, c7`).
-   - Nếu bản vẽ thiếu thông số phụ, tự điền giá trị tiêu chuẩn và bắt buộc ghi chú rõ vào mảng `notes` để người dùng biết.
+4. **Vật liệu và Màu sắc Chân thực**:
+   - Thép/Kim loại vỏ máy: `#b9bec2`, metalness 0.35, roughness 0.55.
+   - Đồng ống nước: `#b87333`, metalness 0.7, roughness 0.3.
+   - Nhựa/Hộp điện: `#2f363d`.
+   - Vùng bảo dưỡng (Clearance): Dựng 1 khối hộp mờ đơn giản phía trước mặt thao tác nếu cần kiểm tra va chạm.
 
 Trong bản vẽ kỹ thuật cơ điện / chế tạo thiết bị:
 1. **Quy tắc phân biệt nét thấy và nét khuất (Hidden Lines vs Visible Lines)**:
@@ -164,7 +124,19 @@ Nếu bản vẽ mờ, thiếu một mặt cắt, hoặc có nhiều tùy chọn
 
 ## Categories
 
-`category` must be exactly one of: Mechanical Equipment, Generic Model, Plumbing Fixture, Electrical Equipment, Lighting Fixture, Specialty Equipment, Furniture, Casework, Door, Window, Structural Framing, Structural Column, Structural Foundation, Site, Planting, Entourage, Data Device.
+`category` must be exactly one of: 
+- **Thiết bị HVAC / Cơ điện**: Mechanical Equipment, Duct Fitting, Duct Elbow, Duct Transition, Duct Tee, Duct Cross, Pipe Fitting, Plumbing Fixture, Electrical Equipment, Lighting Fixture, Specialty Equipment, Data Device.
+- **Kiến trúc / Kết cấu**: Generic Model, Furniture, Casework, Door, Window, Structural Framing, Structural Column, Structural Foundation, Site, Planting, Entourage.
+
+## Hướng dẫn Dựng Phụ kiện Đường ống (MEP Pipe & Duct Fittings: Co, Cút, Chếch, Côn, Tê)
+
+Khi người dùng yêu cầu dựng phụ kiện đường ống (Duct Fitting, Pipe Fitting như Co cút 90°, Chếch 45°, Côn thu chuyển tiết diện, Ba chạc/Tê):
+1. **Category chuẩn**: Chọn đúng category chuyên biệt (`Duct Elbow`, `Duct Transition`, `Duct Tee`, `Duct Cross`, hoặc `Pipe Fitting`) để Revit tự động gán vào routing preferences khi vẽ ống.
+2. **Hình học phụ kiện**:
+   - **Co cút (Elbow / Bend)**: Dựng thân cút theo bán kính uốn tiêu chuẩn $R = 1.0D$ hoặc $R = 1.5D$ (hoặc cút vuông có cánh hướng dòng gió splitter vanes), cổ bích kết nối 2 đầu nhô ra $30 - 50\text{ mm}$ ở 2 góc $0^\circ$ và góc uốn $\alpha$ ($90^\circ$ hoặc $45^\circ$).
+   - **Côn thu / Chuyển tiết diện (Transition / Reducer)**: Dựng thân côn vát vuốt (từ tròn sang tròn, chữ nhật sang chữ nhật, hoặc chữ nhật sang tròn Rectangular to Round) bằng hình học `prism` hoặc `box`/`cylinder` ghép chuyển tiếp mượt mà, chiều dài côn tiêu chuẩn góc vát $\le 30^\circ$ để tránh tổn thất áp suất.
+   - **Tê / Chạc ba (Tee / Branch)**: Thân chính xuyên suốt và nhánh rẽ vuông góc hoặc nghiêng $45^\circ$ kèm cổ bích ở cả 3 đầu.
+3. **Mảng MEP Connectors**: Bắt buộc khai báo đầy đủ các cổng kết nối tương ứng với số đầu của phụ kiện (2 cổng cho Cút & Côn; 3 cổng cho Tê) với kích thước và hướng vector dòng chảy chính xác.
 
 ## Output shape
 

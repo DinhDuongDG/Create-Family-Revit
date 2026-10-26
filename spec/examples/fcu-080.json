@@ -32,7 +32,8 @@
     { "name": "Galvanized Steel", "color": "#b9bec2", "roughness": 0.55, "metalness": 0.35 },
     { "name": "Flange Dark", "color": "#788086", "roughness": 0.6, "metalness": 0.3 },
     { "name": "Copper", "color": "#b87333", "roughness": 0.35, "metalness": 0.75 },
-    { "name": "Junction Box", "color": "#33393e", "roughness": 0.5, "metalness": 0.4 }
+    { "name": "Junction Box", "color": "#33393e", "roughness": 0.5, "metalness": 0.4 },
+    { "name": "Clearance Zone", "color": "#e3b341", "roughness": 0.8, "metalness": 0.05 }
   ],
   "parts": [
     {
@@ -178,6 +179,78 @@
         "origin": { "x": 0, "y": "[Mounting Spacing Depth] / 2", "z": "[Casing Height]" },
         "size": { "x": "[Mounting Spacing Length] + 120mm", "y": 50, "z": 15 }
       }
+    },
+    {
+      "id": "clearance-front-service",
+      "name": "Service Clearance Zone",
+      "material": "Clearance Zone",
+      "solid": {
+        "kind": "box",
+        "origin": { "x": 0, "y": "-[Casing Depth] / 2 - 250mm", "z": 0 },
+        "size": { "x": "[Casing Length]", "y": 500, "z": "[Casing Height]" }
+      }
+    }
+  ],
+  "connectors": [
+    {
+      "id": "conn-discharge-1",
+      "name": "Supply Air 1",
+      "systemType": "SupplyAir",
+      "shape": "rectangular",
+      "direction": "out",
+      "origin": { "x": "-[Casing Length] / 2 + [Discharge Left Margin] + [Discharge Opening Width] / 2", "y": "-[Casing Depth] / 2 - 30mm", "z": "[Casing Height] - [Discharge Top Margin] - [Discharge Opening Height] / 2" },
+      "directionVector": { "x": 0, "y": -1, "z": 0 },
+      "width": "[Discharge Opening Width]",
+      "height": "[Discharge Opening Height]",
+      "flow": 400,
+      "flowUnit": "L/s"
+    },
+    {
+      "id": "conn-discharge-2",
+      "name": "Supply Air 2",
+      "systemType": "SupplyAir",
+      "shape": "rectangular",
+      "direction": "out",
+      "origin": { "x": "-[Casing Length] / 2 + [Discharge Left Margin] + [Discharge Opening Width] * 1.5 + [Discharge Opening Gap]", "y": "-[Casing Depth] / 2 - 30mm", "z": "[Casing Height] - [Discharge Top Margin] - [Discharge Opening Height] / 2" },
+      "directionVector": { "x": 0, "y": -1, "z": 0 },
+      "width": "[Discharge Opening Width]",
+      "height": "[Discharge Opening Height]",
+      "flow": 400,
+      "flowUnit": "L/s"
+    },
+    {
+      "id": "conn-cooling-in",
+      "name": "Chilled Water Supply",
+      "systemType": "HydronicSupply",
+      "shape": "round",
+      "direction": "in",
+      "origin": { "x": "[Casing Length] / 2 + 100mm", "y": "200mm", "z": 240 },
+      "directionVector": { "x": 1, "y": 0, "z": 0 },
+      "diameter": "[Cooling Connection Size]",
+      "flow": 1.2,
+      "flowUnit": "L/s"
+    },
+    {
+      "id": "conn-cooling-out",
+      "name": "Chilled Water Return",
+      "systemType": "HydronicReturn",
+      "shape": "round",
+      "direction": "out",
+      "origin": { "x": "[Casing Length] / 2 + 100mm", "y": "200mm", "z": 120 },
+      "directionVector": { "x": 1, "y": 0, "z": 0 },
+      "diameter": "[Cooling Connection Size]",
+      "flow": 1.2,
+      "flowUnit": "L/s"
+    },
+    {
+      "id": "conn-drain",
+      "name": "Condensate Drain",
+      "systemType": "Sanitary",
+      "shape": "round",
+      "direction": "out",
+      "origin": { "x": "[Casing Length] / 2 + 62mm", "y": "-[Casing Depth] / 2 + 120mm", "z": 40 },
+      "directionVector": { "x": 1, "y": 0, "z": 0 },
+      "diameter": "[Drain Size]"
     }
   ]
 }

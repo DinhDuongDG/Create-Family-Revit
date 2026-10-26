@@ -101,6 +101,31 @@ export interface MaterialDef {
   roughness?: number;
 }
 
+export interface MepConnector {
+  id: string;
+  name: string;
+  systemType:
+    | "SupplyAir"
+    | "ReturnAir"
+    | "ExhaustAir"
+    | "HydronicSupply"
+    | "HydronicReturn"
+    | "Sanitary"
+    | "DomesticColdWater"
+    | "DomesticHotWater"
+    | "Electrical";
+  shape: "round" | "rectangular";
+  direction: "in" | "out" | "bidirectional";
+  origin: Vec3;
+  directionVector?: Vec3;
+  width?: Numeric;
+  height?: Numeric;
+  diameter?: Numeric;
+  flow?: Numeric;
+  flowUnit?: "L/s" | "m3/h" | "CFM";
+  pressureDrop?: Numeric;
+}
+
 export interface FamilySpec {
   schemaVersion: "1.0";
   name: string;
@@ -112,6 +137,7 @@ export interface FamilySpec {
   description?: string;
   parameters: FamilyParameter[];
   parts: FamilyPart[];
+  connectors?: MepConnector[];
   materials?: MaterialDef[];
   notes?: string[];
 }
@@ -153,6 +179,12 @@ export const PARAMETER_GROUPS: ParameterGroup[] = [
 /** Revit category name -> metric family template used by the add-in. */
 export const CATEGORY_TEMPLATES: Record<string, string> = {
   "Mechanical Equipment": "Metric Mechanical Equipment.rft",
+  "Duct Fitting": "Metric Duct Elbow.rft",
+  "Duct Elbow": "Metric Duct Elbow.rft",
+  "Duct Transition": "Metric Duct Transition.rft",
+  "Duct Tee": "Metric Duct Tee.rft",
+  "Duct Cross": "Metric Duct Cross.rft",
+  "Pipe Fitting": "Metric Generic Model.rft",
   "Generic Model": "Metric Generic Model.rft",
   "Plumbing Fixture": "Metric Plumbing Fixture.rft",
   "Electrical Equipment": "Metric Electrical Equipment.rft",

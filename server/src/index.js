@@ -188,6 +188,104 @@ app.get("/api/download-spec", (req, res) => {
   res.download(resolved);
 });
 
+// -------------------------------------------------------------
+// Model Library & Persistence (Lưu, Quản lý, Tiếp tục sửa, Xoá)
+// -------------------------------------------------------------
+function ensureSavedDir() {
+  if (!fs.existsSync(config.dirs.saved)) {
+    fs.mkdirSync(config.dirs.saved, { recursive: true });
+  }
+}
+
+app.get("/api/models", (_req, res) => {
+  try {
+    ensureSavedDir();
+    const files = fs.readdirSync(config.dirs.saved).filter((f) => f.endsWith(".json"));
+    const models = files
+      .map((file) => {
+        try {
+          const filePath = path.join(config.dirs.saved, file);
+          const raw = fs.readFileSync(filePath, "utf8");
+          const data = JSON.parse(raw);
+          const stats = fs.statSync(filePath);
+          return {
+            id: file.replace(/\.json$/, ""),
+            name: data.spec?.name || data.name || file,
+            category: data.spec?.category || data.category || "Mechanical Equipment",
+            updatedAt: stats.mtimeMs,
+            partsCount: data.spec?.parts?.length || data.parts?.length || 0,
+            paramsCount: data.spec?.parameters?.length || data.parameters?.length || 0,
+          };
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.updatedAt - a.updatedAt);
+
+    res.json({ models });
+  } catch (error) {
+    res.status(500).json({ error: error?.message || String(error) });
+  }
+});
+
+app.get("/api/models/:id", (req, res) => {
+  try {
+    ensureSavedDir();
+    const safeId = path.basename(req.params.id).replace(/[^\w.\- ]+/g, "_");
+    const filePath = path.join(config.dirs.saved, `${safeId}.json`);
+    if (!fs.existsSync(filePath)) {
+      res.status(404).json({ error: "Model not found" });
+      return;
+    }
+    const raw = fs.readFileSync(filePath, "utf8");
+    res.json(JSON.parse(raw));
+  } catch (error) {
+    res.status(500).json({ error: error?.message || String(error) });
+  }
+});
+
+app.post("/api/models", (req, res) => {
+  try {
+    ensureSavedDir();
+    const { id, name, spec, entries } = req.body || {};
+    if (!spec || !spec.name) {
+      res.status(400).json({ error: "spec is required" });
+      return;
+    }
+    const modelId = id
+      ? path.basename(id).replace(/[^\w.\- ]+/g, "_")
+      : `${Date.now()}-${(name || spec.name).toLowerCase().replace(/[^\w]+/g, "-").slice(0, 50)}`;
+
+    const filePath = path.join(config.dirs.saved, `${modelId}.json`);
+    const payload = {
+      id: modelId,
+      name: name || spec.name,
+      spec,
+      entries: Array.isArray(entries) ? entries : [],
+      savedAt: Date.now(),
+    };
+    fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), "utf8");
+    res.json({ ok: true, id: modelId, name: payload.name });
+  } catch (error) {
+    res.status(500).json({ error: error?.message || String(error) });
+  }
+});
+
+app.delete("/api/models/:id", (req, res) => {
+  try {
+    ensureSavedDir();
+    const safeId = path.basename(req.params.id).replace(/[^\w.\- ]+/g, "_");
+    const filePath = path.join(config.dirs.saved, `${safeId}.json`);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+    res.json({ ok: true, id: safeId });
+  } catch (error) {
+    res.status(500).json({ error: error?.message || String(error) });
+  }
+});
+
 app.use(express.static(config.dirs.webDist));
 
 app.use((req, res, next) => {

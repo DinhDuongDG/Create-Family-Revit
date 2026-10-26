@@ -11,9 +11,9 @@ export class LlmError extends Error {
 
 function stripFences(text) {
   let trimmed = text.trim();
-  // Strip markdown code fences like ```json ... ``` or ``` ...
+  // Strip code fences like ```json ... ``` or ```python ... ``` or ``` ...
   if (trimmed.includes("```")) {
-    const match = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+    const match = trimmed.match(/```(?:json|python)?\s*([\s\S]*?)\s*```/);
     if (match && match[1]) {
       trimmed = match[1].trim();
     }
@@ -22,56 +22,56 @@ function stripFences(text) {
 }
 
 export function parseModelJson(text) {
-  const clean = stripFences(text);
+  let clean = stripFences(text);
 
-  // Try direct parse
+  // If text starts with python snippet or preface, find the first '{' and last '}'
+  const firstBrace = clean.indexOf("{");
+  const lastBrace = clean.lastIndexOf("}");
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    clean = clean.slice(firstBrace, lastBrace + 1);
+  }
+
+  // 1. Try direct parse
   try {
     return JSON.parse(clean);
   } catch (err1) {
-    // Try jsonrepair on the full cleaned string
+    // 2. Try jsonrepair on the full cleaned string
     try {
       const repaired = jsonrepair(clean);
       return JSON.parse(repaired);
     } catch {
-      /* continue to substring extraction */
+      /* continue to advanced repairing */
     }
 
-    // Try finding outer-most brackets { ... }
-    const start = clean.indexOf("{");
-    const end = clean.lastIndexOf("}");
-    if (start >= 0 && end > start) {
-      const slice = clean.slice(start, end + 1);
-      try {
-        return JSON.parse(slice);
-      } catch {
-        try {
-          const repairedSlice = jsonrepair(slice);
-          return JSON.parse(repairedSlice);
-        } catch {
-          // If still fails, try closing truncated brackets automatically
-          let fixed = slice;
-          const openBraces = (fixed.match(/\{/g) || []).length;
-          const closeBraces = (fixed.match(/\}/g) || []).length;
-          const openBrackets = (fixed.match(/\[/g) || []).length;
-          const closeBrackets = (fixed.match(/\]/g) || []).length;
-          
-          if (openBrackets > closeBrackets) {
-            fixed += "]".repeat(openBrackets - closeBrackets);
-          }
-          if (openBraces > closeBraces) {
-            fixed += "}".repeat(openBraces - closeBraces);
-          }
+    // 3. Clean unescaped quotes or common LLM syntax corruptions inside expressions
+    let sanitized = clean
+      // remove trailing commas before closing braces/brackets
+      .replace(/,\s*([}\]])/g, "$1")
+      // fix unescaped double quotes inside values if any
+      .replace(/:\s*"([^"]*)"([^",}\]]+)"/g, ':"$1 $2"');
 
-          try {
-            return JSON.parse(jsonrepair(fixed));
-          } catch {
-            throw new LlmError(`JSON parsing error: ${err1.message}`);
-          }
-        }
+    try {
+      return JSON.parse(jsonrepair(sanitized));
+    } catch {
+      // Try balancing braces & brackets
+      const openBraces = (sanitized.match(/\{/g) || []).length;
+      const closeBraces = (sanitized.match(/\}/g) || []).length;
+      const openBrackets = (sanitized.match(/\[/g) || []).length;
+      const closeBrackets = (sanitized.match(/\]/g) || []).length;
+      
+      if (openBrackets > closeBrackets) {
+        sanitized += "]".repeat(openBrackets - closeBrackets);
+      }
+      if (openBraces > closeBraces) {
+        sanitized += "}".repeat(openBraces - closeBraces);
+      }
+
+      try {
+        return JSON.parse(jsonrepair(sanitized));
+      } catch (errFinal) {
+        throw new LlmError(`JSON parsing error: ${err1.message}`);
       }
     }
-
-    throw new LlmError("The model did not return valid JSON");
   }
 }
 
