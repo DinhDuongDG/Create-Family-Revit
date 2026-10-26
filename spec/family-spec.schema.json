@@ -1,0 +1,184 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://family-agent.local/family-spec.schema.json",
+  "title": "Family Agent spec",
+  "description": "Declarative description of a parametric Revit family. Units are millimetres, Z is up, the family origin sits at the centre of the footprint on the floor. Any numeric field accepts a number or an expression string such as \"[Casing Length] / 2\".",
+  "type": "object",
+  "required": ["name", "category", "parameters", "parts"],
+  "additionalProperties": true,
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "name": { "type": "string", "description": "Family name, also used for the .rfa file name." },
+    "typeName": { "type": "string", "description": "Revit type name created inside the family." },
+    "category": {
+      "type": "string",
+      "enum": [
+        "Mechanical Equipment",
+        "Generic Model",
+        "Plumbing Fixture",
+        "Electrical Equipment",
+        "Lighting Fixture",
+        "Specialty Equipment",
+        "Furniture",
+        "Casework",
+        "Door",
+        "Window",
+        "Structural Framing",
+        "Structural Column",
+        "Structural Foundation",
+        "Site",
+        "Planting",
+        "Entourage",
+        "Data Device"
+      ]
+    },
+    "template": { "type": "string", "description": "Optional template key override." },
+    "units": { "const": "mm" },
+    "revitVersion": { "type": "string" },
+    "description": { "type": "string" },
+    "parameters": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "type"],
+        "properties": {
+          "name": { "type": "string" },
+          "type": { "enum": ["Length", "Angle", "Number", "Integer", "Text", "YesNo"] },
+          "group": {
+            "enum": [
+              "Dimensions",
+              "Constraints",
+              "Data",
+              "Identity Data",
+              "Graphics",
+              "Materials and Finishes",
+              "Mechanical",
+              "Electrical",
+              "Plumbing",
+              "Energy Analysis",
+              "Structural",
+              "Construction",
+              "Visibility",
+              "Fire Protection",
+              "General",
+              "Other"
+            ]
+          },
+          "value": { "type": ["number", "string", "boolean"] },
+          "formula": {
+            "type": ["string", "null"],
+            "description": "Revit compatible formula. Reference parameters with [Param Name]."
+          },
+          "instance": { "type": "boolean" },
+          "description": { "type": "string" }
+        }
+      }
+    },
+    "materials": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string" },
+          "color": { "type": "string" },
+          "metalness": { "type": "number" },
+          "roughness": { "type": "number" }
+        }
+      }
+    },
+    "parts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["solid"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "material": { "type": "string" },
+          "color": { "type": "string" },
+          "solid": { "$ref": "#/$defs/solid" },
+          "cuts": { "type": "array", "items": { "$ref": "#/$defs/solid" } },
+          "array": {
+            "type": "object",
+            "required": ["count", "spacing"],
+            "properties": {
+              "count": {
+                "type": ["integer", "string"],
+                "description": "Whole number, or an expression that resolves to one, e.g. \"[Fin Count]\".",
+                "minimum": 1,
+                "maximum": 500
+              },
+              "axis": { "enum": ["x", "y", "z"] },
+              "spacing": { "type": ["number", "string"] }
+            }
+          }
+        }
+      }
+    },
+    "notes": { "type": "array", "items": { "type": "string" } }
+  },
+  "$defs": {
+    "numeric": { "type": ["number", "string"] },
+    "vec3": {
+      "type": "object",
+      "required": ["x", "y", "z"],
+      "properties": {
+        "x": { "$ref": "#/$defs/numeric" },
+        "y": { "$ref": "#/$defs/numeric" },
+        "z": { "$ref": "#/$defs/numeric" }
+      }
+    },
+    "solid": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind", "origin", "size"],
+          "properties": {
+            "kind": { "const": "box" },
+            "origin": {
+              "$ref": "#/$defs/vec3",
+              "description": "Centre of the bottom face."
+            },
+            "size": { "$ref": "#/$defs/vec3" },
+            "rotationZ": { "$ref": "#/$defs/numeric" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "base", "radius", "height"],
+          "properties": {
+            "kind": { "const": "cylinder" },
+            "base": { "$ref": "#/$defs/vec3", "description": "Centre of the base face." },
+            "radius": { "$ref": "#/$defs/numeric" },
+            "innerRadius": { "$ref": "#/$defs/numeric" },
+            "height": { "$ref": "#/$defs/numeric", "description": "May be negative to extrude backwards." },
+            "axis": { "enum": ["x", "y", "z"] },
+            "segments": { "type": "integer", "minimum": 12, "maximum": 96 }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "plane", "points", "from", "to"],
+          "properties": {
+            "kind": { "const": "prism" },
+            "plane": { "enum": ["xy", "xz", "yz"] },
+            "points": {
+              "type": "array",
+              "minItems": 3,
+              "items": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 2,
+                "items": { "$ref": "#/$defs/numeric" }
+              }
+            },
+            "from": { "$ref": "#/$defs/numeric" },
+            "to": { "$ref": "#/$defs/numeric" }
+          }
+        }
+      ]
+    }
+  }
+}

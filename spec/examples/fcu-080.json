@@ -1,0 +1,183 @@
+{
+  "schemaVersion": "1.0",
+  "name": "Trane Option Unit-080 Horizontal FCU",
+  "typeName": "080 Horizontal FCU",
+  "category": "Mechanical Equipment",
+  "template": "metric-mechanical-equipment",
+  "units": "mm",
+  "revitVersion": "2024",
+  "description": "Trane Option Unit-080 horizontal fan coil unit based on catalog drawing: 1910 x 1600 x 590 mm enclosed casing with flanged mounting channel, dual front discharge openings with flanges (a2 x c2), junction box, and 5 side piping stubs (Cooling G1 DN50, Heating G2 DN32, Humidifier 1/2 in, Drain 1 in).",
+  "parameters": [
+    { "name": "Casing Length", "type": "Length", "group": "Dimensions", "value": 1910, "description": "Catalog dimension A" },
+    { "name": "Casing Depth", "type": "Length", "group": "Dimensions", "value": 1600, "description": "Catalog dimension B" },
+    { "name": "Casing Height", "type": "Length", "group": "Dimensions", "value": 590, "description": "Catalog dimension C" },
+    { "name": "Overall Height", "type": "Length", "group": "Dimensions", "value": 630, "description": "Catalog dimension F" },
+    { "name": "Mounting Spacing Length", "type": "Length", "group": "Dimensions", "value": 1810, "description": "Catalog dimension D" },
+    { "name": "Mounting Spacing Depth", "type": "Length", "group": "Dimensions", "value": 1640, "description": "Catalog dimension E" },
+    { "name": "Discharge Opening Width", "type": "Length", "group": "Dimensions", "value": 313, "description": "Catalog dimension a2" },
+    { "name": "Discharge Opening Height", "type": "Length", "group": "Dimensions", "value": 346, "description": "Catalog dimension c2" },
+    { "name": "Discharge Opening Gap", "type": "Length", "group": "Dimensions", "value": 240, "description": "Catalog dimension a3" },
+    { "name": "Discharge Left Margin", "type": "Length", "group": "Dimensions", "value": 339, "description": "Catalog dimension a4" },
+    { "name": "Discharge Top Margin", "type": "Length", "group": "Dimensions", "value": 192, "description": "Catalog dimension c1" },
+    { "name": "Cooling Connection Size", "type": "Length", "group": "Dimensions", "value": 50, "description": "G1 DN50" },
+    { "name": "Heating Connection Size", "type": "Length", "group": "Dimensions", "value": 32, "description": "G2 1-Row DN32" },
+    { "name": "Humidifier Inlet Size", "type": "Length", "group": "Dimensions", "value": 15, "description": "1/2 inch" },
+    { "name": "Drain Size", "type": "Length", "group": "Dimensions", "value": 25, "description": "1 inch drain" },
+    { "name": "Stub Length", "type": "Length", "group": "Dimensions", "value": 80 },
+    { "name": "Flange Width", "type": "Length", "group": "Dimensions", "value": 30 },
+    { "name": "Model", "type": "Text", "group": "Identity Data", "value": "Option Unit-080" },
+    { "name": "Manufacturer", "type": "Text", "group": "Identity Data", "value": "Trane" }
+  ],
+  "materials": [
+    { "name": "Galvanized Steel", "color": "#b9bec2", "roughness": 0.55, "metalness": 0.35 },
+    { "name": "Flange Dark", "color": "#788086", "roughness": 0.6, "metalness": 0.3 },
+    { "name": "Copper", "color": "#b87333", "roughness": 0.35, "metalness": 0.75 },
+    { "name": "Junction Box", "color": "#33393e", "roughness": 0.5, "metalness": 0.4 }
+  ],
+  "parts": [
+    {
+      "id": "casing-body",
+      "name": "Casing Body",
+      "material": "Galvanized Steel",
+      "solid": {
+        "kind": "box",
+        "origin": { "x": 0, "y": 0, "z": 0 },
+        "size": { "x": "[Casing Length]", "y": "[Casing Depth]", "z": "[Casing Height]" }
+      }
+    },
+    {
+      "id": "discharge-flange-1",
+      "name": "Discharge Opening Flange 1",
+      "material": "Flange Dark",
+      "solid": {
+        "kind": "box",
+        "origin": {
+          "x": "-[Casing Length] / 2 + [Discharge Left Margin] + [Discharge Opening Width] / 2",
+          "y": "-[Casing Depth] / 2 - 12mm",
+          "z": "[Casing Height] - [Discharge Top Margin] - [Discharge Opening Height]"
+        },
+        "size": { "x": "[Discharge Opening Width]", "y": 24, "z": "[Discharge Opening Height]" }
+      }
+    },
+    {
+      "id": "discharge-flange-2",
+      "name": "Discharge Opening Flange 2",
+      "material": "Flange Dark",
+      "solid": {
+        "kind": "box",
+        "origin": {
+          "x": "-[Casing Length] / 2 + [Discharge Left Margin] + [Discharge Opening Width] * 1.5 + [Discharge Opening Gap]",
+          "y": "-[Casing Depth] / 2 - 12mm",
+          "z": "[Casing Height] - [Discharge Top Margin] - [Discharge Opening Height]"
+        },
+        "size": { "x": "[Discharge Opening Width]", "y": 24, "z": "[Discharge Opening Height]" }
+      }
+    },
+    {
+      "id": "junction-box",
+      "name": "Electrical Junction Box",
+      "material": "Junction Box",
+      "solid": {
+        "kind": "box",
+        "origin": {
+          "x": "[Casing Length] / 2 - 280mm",
+          "y": "-[Casing Depth] / 2 - 18mm",
+          "z": "[Casing Height] - 220mm"
+        },
+        "size": { "x": 220, "y": 36, "z": 160 }
+      }
+    },
+    {
+      "id": "pipe-humidifier",
+      "name": "Humidifier Inlet 1/2 in Stub",
+      "material": "Copper",
+      "solid": {
+        "kind": "cylinder",
+        "axis": "x",
+        "base": { "x": "[Casing Length] / 2", "y": "300mm", "z": 380 },
+        "radius": "[Humidifier Inlet Size] / 2",
+        "height": "62mm"
+      }
+    },
+    {
+      "id": "pipe-drain",
+      "name": "1 in Drain Outlet Stub",
+      "material": "Copper",
+      "solid": {
+        "kind": "cylinder",
+        "axis": "x",
+        "base": { "x": "[Casing Length] / 2", "y": "380mm", "z": 60 },
+        "radius": "[Drain Size] / 2",
+        "height": "100mm"
+      }
+    },
+    {
+      "id": "pipe-g1-in",
+      "name": "Cooling Coil Supply G1 DN50",
+      "material": "Copper",
+      "solid": {
+        "kind": "cylinder",
+        "axis": "x",
+        "base": { "x": "[Casing Length] / 2", "y": "60mm", "z": 240 },
+        "radius": "[Cooling Connection Size] / 2",
+        "height": "78mm"
+      }
+    },
+    {
+      "id": "pipe-g1-out",
+      "name": "Cooling Coil Return G1 DN50",
+      "material": "Copper",
+      "solid": {
+        "kind": "cylinder",
+        "axis": "x",
+        "base": { "x": "[Casing Length] / 2", "y": "60mm", "z": 130 },
+        "radius": "[Cooling Connection Size] / 2",
+        "height": "78mm"
+      }
+    },
+    {
+      "id": "pipe-g2-in",
+      "name": "Heating Coil Supply G2 DN32",
+      "material": "Copper",
+      "solid": {
+        "kind": "cylinder",
+        "axis": "x",
+        "base": { "x": "[Casing Length] / 2", "y": "-220mm", "z": 210 },
+        "radius": "[Heating Connection Size] / 2",
+        "height": "78mm"
+      }
+    },
+    {
+      "id": "pipe-g2-out",
+      "name": "Heating Coil Return G2 DN32",
+      "material": "Copper",
+      "solid": {
+        "kind": "cylinder",
+        "axis": "x",
+        "base": { "x": "[Casing Length] / 2", "y": "-220mm", "z": 110 },
+        "radius": "[Heating Connection Size] / 2",
+        "height": "78mm"
+      }
+    },
+    {
+      "id": "mount-bracket-front",
+      "name": "Mounting Channel Front",
+      "material": "Galvanized Steel",
+      "solid": {
+        "kind": "box",
+        "origin": { "x": 0, "y": "-[Mounting Spacing Depth] / 2", "z": "[Casing Height]" },
+        "size": { "x": "[Mounting Spacing Length] + 120mm", "y": 50, "z": 15 }
+      }
+    },
+    {
+      "id": "mount-bracket-back",
+      "name": "Mounting Channel Back",
+      "material": "Galvanized Steel",
+      "solid": {
+        "kind": "box",
+        "origin": { "x": 0, "y": "[Mounting Spacing Depth] / 2", "z": "[Casing Height]" },
+        "size": { "x": "[Mounting Spacing Length] + 120mm", "y": 50, "z": 15 }
+      }
+    }
+  ]
+}

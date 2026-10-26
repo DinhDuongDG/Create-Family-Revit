@@ -1,0 +1,27 @@
+{
+  "name": "family-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "web",
+    "server"
+  ],
+  "scripts": {
+    "dev": "npm run build:core && node scripts/dev.mjs",
+    "build:core": "npm run build -w @family/spec-core",
+    "build": "npm run build:core && npm run build -w web",
+    "start": "node server/src/index.js",
+    "test": "npm run build:core && npm run test -w @family/spec-core && npm run addin:test",
+    "addin": "dotnet build revit-addin/FamilyAgent.Addin/FamilyAgent.Addin.csproj -c Release",
+    "addin:install": "powershell -NoProfile -ExecutionPolicy Bypass -File revit-addin/install.ps1",
+    "addin:test": "dotnet run --project revit-addin/FamilyAgent.SelfTest/FamilyAgent.SelfTest.csproj -c Release"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "jsonrepair": "^3.15.0"
+  }
+}

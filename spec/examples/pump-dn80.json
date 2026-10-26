@@ -1,0 +1,400 @@
+{
+  "schemaVersion": "1.0",
+  "name": "Inline Centrifugal Pump DN80 CI",
+  "typeName": "Inline Pump DN80",
+  "category": "Mechanical Equipment",
+  "units": "mm",
+  "description": "Vertical inline centrifugal pump with cast iron casing 500 x 320 x 320 mm, DN80 PN16 suction and discharge flanges with 90 mm stubs, and a base frame with four mounting bolt holes.",
+  "parameters": [
+    {
+      "name": "Casing Length",
+      "type": "Length",
+      "group": "Dimensions",
+      "instance": false,
+      "value": 500
+    },
+    {
+      "name": "Casing Width",
+      "type": "Length",
+      "group": "Dimensions",
+      "instance": false,
+      "value": 320
+    },
+    {
+      "name": "Casing Height",
+      "type": "Length",
+      "group": "Dimensions",
+      "instance": false,
+      "value": 320
+    },
+    {
+      "name": "Nominal Bore",
+      "type": "Length",
+      "group": "Dimensions",
+      "instance": false,
+      "value": 80
+    },
+    {
+      "name": "Stub Length",
+      "type": "Length",
+      "group": "Dimensions",
+      "instance": false,
+      "value": 90
+    },
+    {
+      "name": "Flange Thickness",
+      "type": "Length",
+      "group": "Dimensions",
+      "instance": false,
+      "value": 20
+    },
+    {
+      "name": "Pipe Wall Thickness",
+      "type": "Length",
+      "group": "Dimensions",
+      "instance": false,
+      "value": 8
+    },
+    {
+      "name": "Flange Outer Diameter",
+      "type": "Length",
+      "group": "Dimensions",
+      "instance": false,
+      "formula": "[Nominal Bore] + 120mm"
+    },
+    {
+      "name": "Stub Outer Diameter",
+      "type": "Length",
+      "group": "Dimensions",
+      "instance": false,
+      "formula": "[Nominal Bore] + 2 * [Pipe Wall Thickness]"
+    },
+    {
+      "name": "Base Frame Length",
+      "type": "Length",
+      "group": "Dimensions",
+      "instance": false,
+      "formula": "[Casing Length] + 120mm"
+    },
+    {
+      "name": "Base Frame Width",
+      "type": "Length",
+      "group": "Dimensions",
+      "instance": false,
+      "formula": "[Casing Width] + 60mm"
+    },
+    {
+      "name": "Base Frame Height",
+      "type": "Length",
+      "group": "Dimensions",
+      "instance": false,
+      "value": 40
+    },
+    {
+      "name": "Bolt Hole Diameter",
+      "type": "Length",
+      "group": "Dimensions",
+      "instance": false,
+      "value": 18
+    },
+    {
+      "name": "Connection Height",
+      "type": "Length",
+      "group": "Dimensions",
+      "instance": false,
+      "formula": "[Base Frame Height] + [Casing Height] / 2"
+    },
+    {
+      "name": "Motor Diameter",
+      "type": "Length",
+      "group": "Dimensions",
+      "instance": false,
+      "value": 180
+    },
+    {
+      "name": "Motor Height",
+      "type": "Length",
+      "group": "Dimensions",
+      "instance": false,
+      "value": 280
+    },
+    {
+      "name": "Fan Cover Height",
+      "type": "Length",
+      "group": "Dimensions",
+      "instance": false,
+      "value": 40
+    },
+    {
+      "name": "Terminal Box Width",
+      "type": "Length",
+      "group": "Dimensions",
+      "instance": false,
+      "value": 90
+    },
+    {
+      "name": "Terminal Box Depth",
+      "type": "Length",
+      "group": "Dimensions",
+      "instance": false,
+      "value": 70
+    },
+    {
+      "name": "Terminal Box Height",
+      "type": "Length",
+      "group": "Dimensions",
+      "instance": false,
+      "value": 120
+    },
+    {
+      "name": "Model",
+      "type": "Text",
+      "group": "Data",
+      "instance": false,
+      "value": "ILP-DN80"
+    },
+    {
+      "name": "Nominal Pressure",
+      "type": "Text",
+      "group": "Data",
+      "instance": false,
+      "value": "PN16"
+    }
+  ],
+  "parts": [
+    {
+      "id": "base-frame",
+      "name": "Base Frame",
+      "material": "Cast Iron",
+      "solid": {
+        "kind": "box",
+        "origin": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "size": {
+          "x": "[Base Frame Length]",
+          "y": "[Base Frame Width]",
+          "z": "[Base Frame Height]"
+        }
+      },
+      "cuts": [
+        {
+          "kind": "cylinder",
+          "axis": "z",
+          "base": {
+            "x": "[Base Frame Length] / 2 - 40mm",
+            "y": "[Base Frame Width] / 2 - 40mm",
+            "z": 0
+          },
+          "radius": "[Bolt Hole Diameter] / 2",
+          "height": "[Base Frame Height]"
+        },
+        {
+          "kind": "cylinder",
+          "axis": "z",
+          "base": {
+            "x": "-[Base Frame Length] / 2 + 40mm",
+            "y": "[Base Frame Width] / 2 - 40mm",
+            "z": 0
+          },
+          "radius": "[Bolt Hole Diameter] / 2",
+          "height": "[Base Frame Height]"
+        },
+        {
+          "kind": "cylinder",
+          "axis": "z",
+          "base": {
+            "x": "[Base Frame Length] / 2 - 40mm",
+            "y": "-[Base Frame Width] / 2 + 40mm",
+            "z": 0
+          },
+          "radius": "[Bolt Hole Diameter] / 2",
+          "height": "[Base Frame Height]"
+        },
+        {
+          "kind": "cylinder",
+          "axis": "z",
+          "base": {
+            "x": "-[Base Frame Length] / 2 + 40mm",
+            "y": "-[Base Frame Width] / 2 + 40mm",
+            "z": 0
+          },
+          "radius": "[Bolt Hole Diameter] / 2",
+          "height": "[Base Frame Height]"
+        }
+      ]
+    },
+    {
+      "id": "casing-body",
+      "name": "Casing Body",
+      "material": "Cast Iron",
+      "solid": {
+        "kind": "box",
+        "origin": {
+          "x": 0,
+          "y": 0,
+          "z": "[Base Frame Height]"
+        },
+        "size": {
+          "x": "[Casing Length]",
+          "y": "[Casing Width]",
+          "z": "[Casing Height]"
+        }
+      },
+      "cuts": []
+    },
+    {
+      "id": "suction-stub",
+      "name": "Suction Stub",
+      "material": "Cast Iron",
+      "solid": {
+        "kind": "cylinder",
+        "axis": "y",
+        "base": {
+          "x": 0,
+          "y": "-[Casing Width] / 2",
+          "z": "[Connection Height]"
+        },
+        "radius": "[Stub Outer Diameter] / 2",
+        "innerRadius": "[Nominal Bore] / 2",
+        "height": "-[Stub Length]"
+      },
+      "cuts": []
+    },
+    {
+      "id": "suction-flange",
+      "name": "Suction Flange",
+      "material": "Galvanized Steel",
+      "solid": {
+        "kind": "cylinder",
+        "axis": "y",
+        "base": {
+          "x": 0,
+          "y": "-[Casing Width] / 2 - [Stub Length]",
+          "z": "[Connection Height]"
+        },
+        "radius": "[Flange Outer Diameter] / 2",
+        "innerRadius": "[Nominal Bore] / 2",
+        "height": "-[Flange Thickness]"
+      },
+      "cuts": []
+    },
+    {
+      "id": "discharge-stub",
+      "name": "Discharge Stub",
+      "material": "Cast Iron",
+      "solid": {
+        "kind": "cylinder",
+        "axis": "y",
+        "base": {
+          "x": 0,
+          "y": "[Casing Width] / 2",
+          "z": "[Connection Height]"
+        },
+        "radius": "[Stub Outer Diameter] / 2",
+        "innerRadius": "[Nominal Bore] / 2",
+        "height": "[Stub Length]"
+      },
+      "cuts": []
+    },
+    {
+      "id": "discharge-flange",
+      "name": "Discharge Flange",
+      "material": "Galvanized Steel",
+      "solid": {
+        "kind": "cylinder",
+        "axis": "y",
+        "base": {
+          "x": 0,
+          "y": "[Casing Width] / 2 + [Stub Length]",
+          "z": "[Connection Height]"
+        },
+        "radius": "[Flange Outer Diameter] / 2",
+        "innerRadius": "[Nominal Bore] / 2",
+        "height": "[Flange Thickness]"
+      },
+      "cuts": []
+    },
+    {
+      "id": "motor",
+      "name": "Motor Body",
+      "material": "Motor Blue",
+      "solid": {
+        "kind": "cylinder",
+        "axis": "z",
+        "base": {
+          "x": 0,
+          "y": 0,
+          "z": "[Base Frame Height] + [Casing Height]"
+        },
+        "radius": "[Motor Diameter] / 2",
+        "height": "[Motor Height]"
+      },
+      "cuts": []
+    },
+    {
+      "id": "terminal-box",
+      "name": "Terminal Box",
+      "material": "Plastic",
+      "solid": {
+        "kind": "box",
+        "origin": {
+          "x": "[Motor Diameter] / 2",
+          "y": "-[Terminal Box Depth] / 2",
+          "z": "[Base Frame Height] + [Casing Height] + [Motor Height] / 2 - [Terminal Box Height] / 2"
+        },
+        "size": {
+          "x": "[Terminal Box Width]",
+          "y": "[Terminal Box Depth]",
+          "z": "[Terminal Box Height]"
+        }
+      },
+      "cuts": []
+    },
+    {
+      "id": "fan-cover",
+      "name": "Fan Cover",
+      "material": "Motor Blue",
+      "solid": {
+        "kind": "cylinder",
+        "axis": "z",
+        "base": {
+          "x": 0,
+          "y": 0,
+          "z": "[Base Frame Height] + [Casing Height] + [Motor Height]"
+        },
+        "radius": "[Motor Diameter] / 2",
+        "height": "[Fan Cover Height]"
+      },
+      "cuts": []
+    }
+  ],
+  "materials": [
+    {
+      "name": "Cast Iron",
+      "color": "#6f7579",
+      "metalness": 0.35,
+      "roughness": 0.55
+    },
+    {
+      "name": "Galvanized Steel",
+      "color": "#b9bec2",
+      "metalness": 0.35,
+      "roughness": 0.55
+    },
+    {
+      "name": "Motor Blue",
+      "color": "#355a8c",
+      "metalness": 0.25,
+      "roughness": 0.6
+    },
+    {
+      "name": "Plastic",
+      "color": "#2e3236",
+      "metalness": 0,
+      "roughness": 0.8
+    }
+  ]
+}

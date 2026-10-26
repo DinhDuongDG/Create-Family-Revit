@@ -1,0 +1,12 @@
+node_modules/
+dist/
+bin/
+obj/
+.env
+.env.local
+*.log
+.queue/
+revit-addin/**/bin/
+revit-addin/**/obj/
+tmp/
+.uploads/

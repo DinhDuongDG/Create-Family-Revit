@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RevitAddIns>
+  <AddIn Type="Application">
+    <Name>Family Agent</Name>
+    <Assembly>{{ASSEMBLY}}</Assembly>
+    <AddInId>8b0f4a8e-2c11-4f5a-9a0e-6f1f4d1c2a77</AddInId>
+    <FullClassName>FamilyAgent.Addin.App</FullClassName>
+    <VendorId>FAMLYAGT</VendorId>
+    <VendorDescription>Family Agent — parametric Revit family studio</VendorDescription>
+  </AddIn>
+</RevitAddIns>
