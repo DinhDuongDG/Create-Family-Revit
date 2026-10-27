@@ -80,6 +80,12 @@ namespace FamilyAgent.Addin
                 stage = "locking the geometry to the reference planes";
                 var locks = LockGeometry(document, skeleton, forms, result.Warnings);
 
+                if (Environment.GetEnvironmentVariable("FAMILY_AGENT_PROBE") == "1")
+                {
+                    stage = "self-checking the parameters";
+                    result.Warnings.Add("selfcheck: " + SelfCheck(document, skeleton, parameters));
+                }
+
                 result.Stats = new
                 {
                     parts = model.Parts.Count,
@@ -364,13 +370,21 @@ namespace FamilyAgent.Addin
 
             public ReferencePlane Find(PlaneAxis axis, double coordinate)
             {
+                SkeletonPlane best = null;
+                var bestDistance = 1.0 / MmPerFoot;
+
                 foreach (var candidate in Planes)
                 {
                     if (candidate.Axis != axis) continue;
-                    if (Math.Abs(candidate.Coordinate - coordinate) <= 1.0 / MmPerFoot) return candidate.Plane;
+
+                    var distance = Math.Abs(candidate.Coordinate - coordinate);
+                    if (distance > bestDistance) continue;
+
+                    best = candidate;
+                    bestDistance = distance;
                 }
 
-                return null;
+                return best?.Plane;
             }
 
             public bool Drives(PlaneAxis axis, double coordinate)
@@ -378,7 +392,10 @@ namespace FamilyAgent.Addin
                 foreach (var candidate in Planes)
                 {
                     if (candidate.Axis != axis || !candidate.Drives) continue;
-                    if (Math.Abs(candidate.Coordinate - coordinate) <= 1.0 / MmPerFoot) return true;
+
+                    // Tight tolerance: an alignment needs the face to sit exactly on the plane,
+                    // a near miss makes NewAlignment throw "not geometrically aligned".
+                    if (Math.Abs(candidate.Coordinate - coordinate) <= 0.05 / MmPerFoot) return true;
                 }
 
                 return false;
@@ -436,6 +453,17 @@ namespace FamilyAgent.Addin
 
                 return false;
             }
+
+            public int Count(PlaneAxis axis, double millimeters)
+            {
+                var count = 0;
+                foreach (var value in _values[axis])
+                {
+                    if (Math.Abs(value - millimeters) <= 1) count += 1;
+                }
+
+                return count;
+            }
         }
 
         private static CoordinateSet ModelCoordinates(ResolvedModel model)
@@ -451,6 +479,47 @@ namespace FamilyAgent.Addin
             }
 
             return coordinates;
+        }
+
+        /// <summary>
+        /// Picks the axis a length parameter really measures along: the axis whose overall
+        /// size matches the value, then the axis with the most faces sitting on it. Guessing
+        /// from the name alone puts e.g. "Panel Thickness" on Z when the panels are thick in X.
+        /// </summary>
+        private static PlaneAxis ChooseAxis(
+            string name,
+            double millimetres,
+            ResolvedModel model,
+            CoordinateSet coordinates)
+        {
+            var preferred = AxisFor(name);
+            var order = new[] { preferred, PlaneAxis.X, PlaneAxis.Y, PlaneAxis.Z };
+
+            foreach (var axis in order)
+            {
+                var size = axis == PlaneAxis.X
+                    ? model.Bounds.Size.X
+                    : axis == PlaneAxis.Y
+                        ? model.Bounds.Size.Y
+                        : model.Bounds.Size.Z;
+
+                if (Math.Abs(size - millimetres) <= 1) return axis;
+            }
+
+            var best = preferred;
+            var bestCount = coordinates.Count(preferred, millimetres) + coordinates.Count(preferred, -millimetres);
+
+            foreach (var axis in order)
+            {
+                var count = coordinates.Count(axis, millimetres) + coordinates.Count(axis, -millimetres);
+                if (count > bestCount)
+                {
+                    best = axis;
+                    bestCount = count;
+                }
+            }
+
+            return best;
         }
 
         /// <summary>
@@ -543,7 +612,7 @@ namespace FamilyAgent.Addin
                     ? familyParameter
                     : null;
 
-                var axis = AxisFor(parameter.Name);
+                var axis = ChooseAxis(parameter.Name, value, model, coordinates);
 
                 if (axis == PlaneAxis.Z)
                 {
@@ -726,9 +795,10 @@ namespace FamilyAgent.Addin
         }
 
         /// <summary>
-        /// Locks form faces onto the reference planes they sit on. NewAlignment returns a
-        /// locked dimension, so moving a labelled plane drags the face with it and the solids
-        /// rebuild when a parameter changes, instead of sitting frozen.
+        /// Locks each solid to at most one driven plane per axis — the face furthest from the
+        /// form's own centre. NewAlignment returns a locked dimension, so moving a labelled
+        /// plane drags the face with it; locking both opposite faces to two independent
+        /// parameters lets them cross and Revit refuses to rebuild the extrusion.
         /// </summary>
         private static int LockGeometry(
             Document document,
@@ -754,68 +824,26 @@ namespace FamilyAgent.Addin
                     var solidForm = form as Extrusion;
                     if (solidForm == null || !solidForm.IsSolid) continue;
 
-                    GeometryElement geometry;
-                    try
-                    {
-                        geometry = form.get_Geometry(options);
-                    }
-                    catch
-                    {
-                        continue;
-                    }
+                    var faces = new List<FaceCandidate>();
+                    CollectFaces(form, options, skeleton, faces);
 
-                    if (geometry == null) continue;
-
-                    foreach (var geometryObject in geometry)
+                    foreach (PlaneAxis axis in new[] { PlaneAxis.X, PlaneAxis.Y, PlaneAxis.Z })
                     {
-                        var solid = geometryObject as Solid;
-                        if (solid == null) continue;
+                        var best = ChooseFace(faces, axis);
+                        if (best == null) continue;
 
-                        foreach (Face face in solid.Faces)
+                        var view = axis == PlaneAxis.Z ? skeleton.Elevation : skeleton.Plan;
+                        if (view == null) continue;
+
+                        try
                         {
-                            var planar = face as PlanarFace;
-                            if (planar == null || face.Reference == null) continue;
-
-                            var normal = planar.FaceNormal;
-                            PlaneAxis axis;
-                            double coordinate;
-
-                            if (Math.Abs(normal.X) > 0.999)
-                            {
-                                axis = PlaneAxis.X;
-                                coordinate = planar.Origin.X;
-                            }
-                            else if (Math.Abs(normal.Y) > 0.999)
-                            {
-                                axis = PlaneAxis.Y;
-                                coordinate = planar.Origin.Y;
-                            }
-                            else if (Math.Abs(normal.Z) > 0.999)
-                            {
-                                axis = PlaneAxis.Z;
-                                coordinate = planar.Origin.Z;
-                            }
-                            else
-                            {
-                                continue;
-                            }
-
-                            if (!skeleton.Drives(axis, coordinate)) continue;
-
-                            var plane = skeleton.Find(axis, coordinate);
-                            var view = axis == PlaneAxis.Z ? skeleton.Elevation : skeleton.Plan;
-                            if (plane == null || view == null) continue;
-
-                            try
-                            {
-                                document.FamilyCreate.NewAlignment(view, plane.GetReference(), face.Reference);
-                                locked += 1;
-                            }
-                            catch (Exception ex)
-                            {
-                                // One stubborn face must not cost the whole family its constraints.
-                                if (failures.Messages.Count < 3) warnings.Add($"Lock \"{form.Name}\": {ex.Message}");
-                            }
+                            document.FamilyCreate.NewAlignment(view, best.Plane.GetReference(), best.Face.Reference);
+                            locked += 1;
+                        }
+                        catch (Exception ex)
+                        {
+                            // One stubborn face must not cost the whole family its constraints.
+                            if (failures.Messages.Count < 3) warnings.Add($"Lock \"{form.Name}\": {ex.Message}");
                         }
                     }
                 }
@@ -830,6 +858,191 @@ namespace FamilyAgent.Addin
             }
 
             return locked;
+        }
+
+        private sealed class FaceCandidate
+        {
+            public PlaneAxis Axis;
+            public double Coordinate;
+            public Face Face;
+            public ReferencePlane Plane;
+        }
+
+        private static void CollectFaces(
+            Element form,
+            Options options,
+            PlaneSkeleton skeleton,
+            List<FaceCandidate> faces)
+        {
+            GeometryElement geometry;
+            try
+            {
+                geometry = form.get_Geometry(options);
+            }
+            catch
+            {
+                return;
+            }
+
+            if (geometry == null) return;
+
+            foreach (var geometryObject in geometry)
+            {
+                var solid = geometryObject as Solid;
+                if (solid == null) continue;
+
+                foreach (Face face in solid.Faces)
+                {
+                    var planar = face as PlanarFace;
+                    if (planar == null || face.Reference == null) continue;
+
+                    var normal = planar.FaceNormal;
+                    PlaneAxis axis;
+                    double coordinate;
+
+                    if (Math.Abs(normal.X) > 0.999)
+                    {
+                        axis = PlaneAxis.X;
+                        coordinate = planar.Origin.X;
+                    }
+                    else if (Math.Abs(normal.Y) > 0.999)
+                    {
+                        axis = PlaneAxis.Y;
+                        coordinate = planar.Origin.Y;
+                    }
+                    else if (Math.Abs(normal.Z) > 0.999)
+                    {
+                        axis = PlaneAxis.Z;
+                        coordinate = planar.Origin.Z;
+                    }
+                    else
+                    {
+                        continue;
+                    }
+
+                    if (!skeleton.Drives(axis, coordinate)) continue;
+
+                    var plane = skeleton.Find(axis, coordinate);
+                    if (plane == null) continue;
+
+                    faces.Add(new FaceCandidate
+                    {
+                        Axis = axis,
+                        Coordinate = coordinate,
+                        Face = face,
+                        Plane = plane,
+                    });
+                }
+            }
+        }
+
+        private static FaceCandidate ChooseFace(List<FaceCandidate> faces, PlaneAxis axis)
+        {
+            var onAxis = faces.Where(candidate => candidate.Axis == axis).ToList();
+            if (onAxis.Count == 0) return null;
+            if (onAxis.Count == 1) return onAxis[0];
+
+            // The face furthest from the datum wins: that is the one an overall dimension
+            // measures, and the one that cannot collapse the form onto itself.
+            return onAxis.OrderByDescending(candidate => Math.Abs(candidate.Coordinate)).First();
+        }
+
+        /// <summary>
+        /// Build-time proof that the constraints work: drags a labelled reference plane and
+        /// reports whether the geometry followed, then puts it back. The bridge cannot use
+        /// FamilyManager.Set, but moving the plane is the same edit the user makes in Revit.
+        /// Runs only with FAMILY_AGENT_PROBE=1.
+        /// </summary>
+        private static string SelfCheck(Document document, PlaneSkeleton skeleton, CoreParameterSet parameters)
+        {
+            var report = new StringBuilder();
+            var before = ModelSignature(document);
+            var tried = 0;
+
+            foreach (var parameter in parameters.Ordered)
+            {
+                if (tried >= 6) break;
+                if (!IsType(parameter.Type, "Length")) continue;
+                if (!string.IsNullOrWhiteSpace(parameter.Formula)) continue;
+                if (!parameter.Number.HasValue) continue;
+
+                var millimetres = Math.Abs(parameter.Number.Value);
+                if (millimetres < 1) continue;
+
+                var target = Ft(millimetres);
+                var candidate = skeleton.Planes.FirstOrDefault(entry =>
+                    entry.Drives &&
+                    Math.Abs(Math.Abs(entry.Coordinate) - target) < 1.0 / MmPerFoot);
+
+                if (candidate == null) continue;
+                tried += 1;
+
+                var delta = new XYZ(
+                    candidate.Axis == PlaneAxis.X ? 50.0 / MmPerFoot : 0,
+                    candidate.Axis == PlaneAxis.Y ? 50.0 / MmPerFoot : 0,
+                    candidate.Axis == PlaneAxis.Z ? 50.0 / MmPerFoot : 0);
+
+                var label = parameter.Name + ": ";
+
+                try
+                {
+                    using (var transaction = SilentTransaction(document, "self-check", new FailureCollector()))
+                    {
+                        transaction.Start();
+                        ElementTransformUtils.MoveElement(document, candidate.Plane.Id, delta);
+                        document.Regenerate();
+
+                        report.Append(label)
+                            .Append(Math.Abs(before - ModelSignature(document)) > 1e-9 ? "MOVE; " : "still; ");
+
+                        // Roll back: the probe only measures, the saved family keeps its values.
+                        var status = transaction.RollBack();
+                        if (status != TransactionStatus.RolledBack)
+                        {
+                            report.Append("rollback=").Append(status).Append("; ");
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    report.Append(label).Append("X ").Append(ex.Message).Append("; ");
+                }
+            }
+
+            return report.ToString();
+        }
+
+        private static double ModelSignature(Document document)
+        {
+            var signature = 0.0;
+            var options = new Options { ComputeReferences = false, DetailLevel = ViewDetailLevel.Fine };
+
+            foreach (var extrusion in new FilteredElementCollector(document)
+                         .OfClass(typeof(Extrusion))
+                         .Cast<Extrusion>())
+            {
+                var geometry = extrusion.get_Geometry(options);
+                if (geometry == null) continue;
+
+                foreach (var geometryObject in geometry)
+                {
+                    var solid = geometryObject as Solid;
+                    if (solid == null) continue;
+
+                    var box = solid.GetBoundingBox();
+                    if (box == null) continue;
+
+                    var dx = box.Max.X - box.Min.X;
+                    var dy = box.Max.Y - box.Min.Y;
+                    var dz = box.Max.Z - box.Min.Z;
+
+                    // Volume catches stretch, the corner sum catches a pure move.
+                    signature += dx * dy * dz;
+                    signature += 0.0001 * (box.Min.X + box.Min.Y + box.Min.Z + box.Max.X + box.Max.Y + box.Max.Z);
+                }
+            }
+
+            return signature;
         }
 
         private sealed class PlaneDimension
