@@ -1,0 +1,10 @@
+# Taste
+- Communicates in Vietnamese and expects replies in Vietnamese (including status summaries and end-of-day recaps). Confidence: 0.92
+- Rejects UI that looks foreign to the existing app: new controls must reuse the current design tokens (colors, 11.5px sizing, border radius, spacing) instead of adopting another palette, and misaligned/oversized controls are called out as "lạc quẻ". Confidence: 0.8
+- Directs visual redesigns by attaching a reference screenshot/image and expects the implementation to follow that reference's layout closely (e.g. pill-style tabs, rounded search field with icon, collapsible groups, rounded value boxes). Confidence: 0.7
+- Likes soft, rounded, modern component styling (10px rounded containers, 8px rows, subtle shadows, hover/focus rings) applied within the app's existing tokens rather than default browser controls. Confidence: 0.65
+- Wants long-running agent work to show visible, staged progress in the main workspace — which step is active, what the agent is doing right now, elapsed time — plus a way to cancel mid-run. Confidence: 0.75
+- Prefers the local Command Code CLI (`cmdc`) as the agent backend, with a model selector, rather than API-key providers such as OpenAI. Confidence: 0.7
+- Wants the workspace layout adjustable by the user: both the left (agent/chat) panel and the right (parameters/parts) panel must be draggable wider/narrower instead of occupying fixed widths. Confidence: 0.6
+- Wants tools to accept real project documents (e.g. a manufacturer PDF datasheet) and take dimensions/components from them, not just free-text descriptions. Confidence: 0.6
+- Prefers one-click end-to-end execution: a build action must hand back the final artifact (e.g. the .rfa file) itself, auto-launching whatever external app is needed, instead of telling him to open Revit manually or settle for a queued/manual finish. Confidence: 0.6

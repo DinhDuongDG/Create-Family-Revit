@@ -45,7 +45,13 @@ export const config = {
   },
   bridge: {
     url: (process.env.REVIT_BRIDGE_URL || "http://127.0.0.1:8765").replace(/\/+$/, ""),
-    timeoutMs: Number(process.env.REVIT_BRIDGE_TIMEOUT || 180000),
+    timeoutMs: Number(process.env.REVIT_BRIDGE_TIMEOUT || 300000),
+  },
+  revit: {
+    exe: process.env.REVIT_EXE || "",
+    version: process.env.REVIT_VERSION || "2024",
+    autoStart: process.env.REVIT_AUTO_START !== "0",
+    startTimeoutMs: Number(process.env.REVIT_START_TIMEOUT || 240000),
   },
   dirs: {
     root: ROOT,
