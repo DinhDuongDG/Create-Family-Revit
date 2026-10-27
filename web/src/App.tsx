@@ -24,6 +24,7 @@ import {
   saveModel,
   deleteSavedModel,
   type Health,
+  type Lod,
   type UploadedDocument,
   type SavedModelMeta,
 } from "./lib/api";
@@ -75,6 +76,17 @@ function storeWidth(key: string, value: number): void {
   }
 }
 
+const LOD_LEVELS: Lod[] = [200, 300, 400];
+
+function readStoredLod(): Lod {
+  try {
+    const stored = Number(window.localStorage.getItem("fa.lod"));
+    return LOD_LEVELS.includes(stored as Lod) ? (stored as Lod) : 300;
+  } catch {
+    return 300;
+  }
+}
+
 export function App() {
   const [spec, setSpec] = useState<FamilySpec | null>(null);
   const [entries, setEntries] = useState<ChatEntry[]>([
@@ -92,6 +104,7 @@ export function App() {
   const [native, setNative] = useState(false);
   const [units, setUnits] = useState<Units>("mm");
   const [revitVersion, setRevitVersion] = useState("2024");
+  const [lod, setLod] = useState<Lod>(readStoredLod);
   const [model, setModel] = useState("");
   const [attachments, setAttachments] = useState<UploadedDocument[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -229,6 +242,23 @@ export function App() {
     setAttachments((current) => current.filter((_, idx) => idx !== index));
   };
 
+  const handleLod = (value: Lod) => {
+    setLod(value);
+    try {
+      window.localStorage.setItem("fa.lod", String(value));
+    } catch {
+      /* private mode, ignore */
+    }
+
+    if (spec) {
+      setToast({
+        text: `Đã chọn LOD ${value}`,
+        sub: "Yêu cầu chỉnh sửa tiếp theo sẽ dựng lại mô hình ở mức chi tiết này.",
+        tone: "ok",
+      });
+    }
+  };
+
   const handleSend = async (text: string) => {
     if (running || uploading) return;
     const hadSpec = Boolean(spec);
@@ -250,6 +280,7 @@ export function App() {
         {
           prompt: text,
           spec,
+          lod,
           model: model || undefined,
           attachments: docs.length > 0 ? docs.map((d) => ({ path: d.path, name: d.name })) : undefined,
         },
@@ -273,7 +304,7 @@ export function App() {
 
           pushEntry({
             role: "agent",
-            text: `${hadSpec ? "Đã cập nhật" : "Đã tạo"} ${event.spec.name}.\n${stats.parts} chi tiết · ${stats.parameters} tham số${dims ? ` · ${dims}` : ""}`,
+            text: `${hadSpec ? "Đã cập nhật" : "Đã tạo"} ${event.spec.name}.\n${stats.parts} chi tiết · ${stats.parameters} tham số${stats.lod ? ` · LOD ${stats.lod}` : ""}${dims ? ` · ${dims}` : ""}`,
             notes: event.spec.notes,
             meta: `${formatDuration(stats.elapsedMs)}${stats.attempts > 1 ? ` · ${stats.attempts} lượt` : ""}`,
             issues: [...event.errors, ...event.issues.filter((issue) => issue.severity === "warning")].slice(0, 12),
@@ -441,6 +472,7 @@ export function App() {
       if (detail && detail.spec) {
         setSpec(detail.spec);
         setCurrentModelId(detail.id);
+        if (detail.spec.lod) handleLod(detail.spec.lod);
         if (Array.isArray(detail.entries) && detail.entries.length > 0) {
           setEntries(detail.entries);
         } else {
@@ -701,6 +733,8 @@ export function App() {
         onUnits={setUnits}
         revitVersion={revitVersion}
         onRevitVersion={setRevitVersion}
+        lod={lod}
+        onLod={handleLod}
         onBuild={handleBuild}
         canBuild={Boolean(analysis?.ok)}
         building={building}

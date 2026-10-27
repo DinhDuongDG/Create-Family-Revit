@@ -5,6 +5,7 @@ export interface DesignStats {
   parts: number;
   instances: number;
   materials: number;
+  lod?: number;
   bounds: { x: number; y: number; z: number } | null;
   attempts: number;
   elapsedMs: number;
@@ -92,8 +93,16 @@ export async function uploadDocument(file: File): Promise<UploadedDocument> {
   return payload as UploadedDocument;
 }
 
+export type Lod = 200 | 300 | 400;
+
 export async function streamDesign(
-  payload: { prompt: string; spec: FamilySpec | null; model?: string; attachments?: { path: string; name: string }[] },
+  payload: {
+    prompt: string;
+    spec: FamilySpec | null;
+    lod?: Lod;
+    model?: string;
+    attachments?: { path: string; name: string }[];
+  },
   onEvent: (event: DesignEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {

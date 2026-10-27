@@ -95,6 +95,7 @@ namespace FamilyAgent.Addin
                     refPlanes = skeleton.Created,
                     refDimensions,
                     locks,
+                    lod = spec.Lod,
                     parameters = parameters.Ordered.Count,
                     bounds = new
                     {
@@ -106,7 +107,7 @@ namespace FamilyAgent.Addin
                 };
 
                 stage = "saving the family";
-                PrepareViews(document);
+                PrepareViews(document, spec.Lod);
 
                 var directory = OutputDirectory();
                 Directory.CreateDirectory(directory);
@@ -138,10 +139,17 @@ namespace FamilyAgent.Addin
 
         /// <summary>
         /// Templates open their 3D view in hidden line, which makes a solid family read as
-        /// a wireframe. Save it shaded so the built family matches the studio preview.
+        /// a wireframe. Save it shaded so the built family matches the studio preview, and
+        /// follow the chosen LOD for the view detail level.
         /// </summary>
-        private static void PrepareViews(Document document)
+        private static void PrepareViews(Document document, int? lod)
         {
+            var detail = lod == 200
+                ? ViewDetailLevel.Coarse
+                : lod == 300
+                    ? ViewDetailLevel.Medium
+                    : ViewDetailLevel.Fine;
+
             try
             {
                 using (var transaction = new Transaction(document, "Family Agent — prepare views"))
@@ -154,7 +162,7 @@ namespace FamilyAgent.Addin
                                  .Where(candidate => !candidate.IsTemplate && candidate.CanBePrinted))
                     {
                         view.DisplayStyle = DisplayStyle.ShadingWithEdges;
-                        view.DetailLevel = ViewDetailLevel.Fine;
+                        view.DetailLevel = detail;
                     }
 
                     transaction.Commit();

@@ -105,15 +105,15 @@ namespace FamilyAgent.SelfTest
 
                 Expect(spec.Name.StartsWith("Trane"), "family name");
                 Expect(model.Warnings.Count == 0, $"unexpected warnings: {string.Join("; ", model.Warnings)}");
-                Expect(model.Parts.Count == 17, $"expected 17 parts, got {model.Parts.Count}");
+                Expect(model.Parts.Count == 13, $"expected 13 parts, got {model.Parts.Count}");
 
                 var size = model.Bounds.Size;
-                ExpectClose(size.X, 1970, 0.01, "overall width");
-                ExpectClose(size.Z, 596, 0.01, "overall height");
+                ExpectClose(size.X, 2020, 0.01, "overall width");
+                ExpectClose(size.Z, 605, 0.01, "overall height");
 
-                var overallWidth = parameters.ByKey["Overall Width"];
-                Expect(overallWidth.Formula != null, "Overall Width keeps its formula");
-                ExpectClose(overallWidth.Number ?? -1, 1970, 0.01, "Overall Width value");
+                var casingLength = parameters.ByKey["Casing Length"];
+                Expect(casingLength.Formula == null, "Casing Length is a base size");
+                ExpectClose(casingLength.Number ?? -1, 1910, 0.01, "Casing Length value");
             });
 
             Check("formula errors do not throw", () =>

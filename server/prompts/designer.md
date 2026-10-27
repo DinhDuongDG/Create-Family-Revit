@@ -39,7 +39,7 @@ Each part has `id`, `name`, `material`, one `solid`, optional `cuts` (array of p
 
 Rules that keep the model clean:
 
-- 12 to 40 parts. Model what a manufacturer would show:
+- The part budget comes from the Level of Detail block below. Model what a manufacturer would show:
   * Casing, access doors, top flanged deck/lip or mounting rails.
   * Duct openings / discharge collar (e.g. twin fan outlets a2 × c2 spaced a3 apart).
   * Electrical junction box with realistic dimensions on casing side.
@@ -52,15 +52,9 @@ Rules that keep the model clean:
 - Give every part a `material` name and declare the materials array with a hex colour, roughness and metalness so the 3D preview looks right.
 - Metal casing: colour #b9bec2, metalness 0.35, roughness 0.55. Copper pipe: #b87333. Dark machinery / motor / fan scroll: #4b5257. Filter media: #cfc3a8. Electrical box: #2f363d. Galvanized trim / flange: #9aa1a6.
 
-## Tiêu chuẩn Dựng Family LOD 300 Thực tế & Gọn nhẹ (Standard LOD 300 Family)
+## Mức độ chi tiết (Level of Detail)
 
-Mục tiêu cốt lõi: Tạo family chuẩn **LOD 300** đáp ứng thiết kế, định tuyến cơ điện MEP và xuất khối lượng, **tuyệt đối không làm nặng file Revit (No Over-modeling / No Micro-details)**:
-- **Số lượng parts**: Tối ưu từ **4 đến 16 parts** gọn gàng, rõ ràng.
-- **Không dựng các chi tiết siêu vi mô**: KHÔNG dựng từng vòng ren răng ốc (thread crests), không dựng từng bulông đai ốc li ti, không dựng hàng chục cánh tản nhiệt rời. Các chi tiết ren hay rãnh chỉ cần thể hiện bằng khối hình học bao chính và vật liệu.
-- **Tập trung vào 3 yếu tố quyết định của LOD 300**:
-  1. **Hình khối bao chính xác (Accurate Overall Boundary)**: Kích thước dài x rộng x cao, tỷ lệ chuẩn catalog.
-  2. **Cổng kết nối chuẩn vị trí (Accurate MEP Interfaces)**: Miệng gió, cổ bích, đầu ống cấp/hồi/xả nhô ra đúng vị trí và đường kính danh định để bắt ống gió/ống nước.
-  3. **Hệ thống tham số thông minh (Parametric Driving)**: Kích thước gắn với tham số trong group `Dimensions` để co dãn khi đổi Type.
+{{lodStandard}}
 
 1. **Định hướng và Tâm tọa độ chuẩn (Origin & Hosting Orientation)**:
    - Tâm tọa độ `(X=0, Y=0)` tại sàn `Z=0` là giao điểm của 2 mặt phẳng tham chiếu gốc (Center Front/Back & Center Left/Right).

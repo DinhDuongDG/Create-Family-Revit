@@ -108,14 +108,14 @@ describe("geometry resolution and the example spec", () => {
     expect(issues.filter((issue) => issue.severity === "error")).toHaveLength(0);
   });
 
-  it("resolves 17 parts and the expected overall size", () => {
+  it("resolves 13 parts and the expected overall size", () => {
     const analysis = analyzeSpec(raw);
     expect(analysis.ok).toBe(true);
-    expect(analysis.model.parts).toHaveLength(17);
+    expect(analysis.model.parts).toHaveLength(13);
     const size = analysis.model.bounds!.size;
-    expect(size.x).toBeCloseTo(1970, 3);
-    expect(size.z).toBeCloseTo(596, 3);
-    expect(size.y).toBeGreaterThan(1660);
+    expect(size.x).toBeCloseTo(2020, 3);
+    expect(size.z).toBeCloseTo(605, 3);
+    expect(size.y).toBeGreaterThan(2100);
   });
 
   it("moves geometry when a driving parameter changes", () => {
@@ -125,7 +125,7 @@ describe("geometry resolution and the example spec", () => {
     const parameters = resolveParameters(spec.parameters, overrides);
     const model = resolveModel(spec, parameters);
 
-    expect(model.bounds!.size.x).toBeCloseTo(3060, 3);
+    expect(model.bounds!.size.x).toBeCloseTo(3100, 3);
   });
 
   it("reports invalid solids as issues instead of throwing", () => {

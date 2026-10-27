@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import type { Units } from "../lib/format";
+import type { Lod } from "../lib/api";
 
 interface Props {
   name: string;
@@ -13,6 +14,8 @@ interface Props {
   onUnits: (units: Units) => void;
   revitVersion: string;
   onRevitVersion: (version: string) => void;
+  lod: Lod;
+  onLod: (lod: Lod) => void;
   onBuild: () => void;
   canBuild: boolean;
   building: boolean;
@@ -21,6 +24,12 @@ interface Props {
   onNewModel?: () => void;
   onLoadDemo?: (key: "fcu" | "pump" | "elbow") => void;
 }
+
+const LOD_OPTIONS: { value: Lod; label: string; hint: string }[] = [
+  { value: 200, label: "200", hint: "LOD 200 · khối bao, 3-8 parts" },
+  { value: 300, label: "300", hint: "LOD 300 · thiết kế thực tế, 4-16 parts" },
+  { value: 400, label: "400", hint: "LOD 400 · chi tiết chế tạo, 18-45 parts" },
+];
 
 const AGENT_STEPS = ["Read brief", "Design family", "Check model"];
 
@@ -52,6 +61,8 @@ export function TopBar({
   onUnits,
   revitVersion,
   onRevitVersion,
+  lod,
+  onLod,
   onBuild,
   canBuild,
   building,
@@ -210,6 +221,24 @@ export function TopBar({
           >
             ft-in
           </button>
+        </div>
+
+        <div className="lod-group" title="Mức độ chi tiết (Level of Detail) khi dựng family">
+          <span className="lod-label">LOD</span>
+          <div className="segmented" role="group" aria-label="Level of detail">
+            {LOD_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                className={lod === option.value ? "active" : ""}
+                onClick={() => onLod(option.value)}
+                title={option.hint}
+                aria-pressed={lod === option.value}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         <select

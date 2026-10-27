@@ -190,6 +190,25 @@ textarea {
   box-shadow: 0 1px 2px rgba(30, 30, 30, 0.08);
 }
 
+.lod-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.lod-label {
+  font-size: 11px;
+  font-weight: 550;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+}
+
+.lod-group .segmented button {
+  min-width: 30px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
 .select {
   border: 1px solid var(--line);
   background: var(--panel-2);
