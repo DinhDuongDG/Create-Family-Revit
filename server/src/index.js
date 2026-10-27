@@ -6,6 +6,7 @@ import { config } from "./config.js";
 import { design } from "./designer.js";
 import { buildFamily } from "./bridge.js";
 import { agentStatus, getCmdcModels } from "./agents.js";
+import { bridgeAlive, ensureBridge, findRevitExe } from "./revit.js";
 
 const app = express();
 app.use(express.json({ limit: "30mb" }));
@@ -64,6 +65,11 @@ app.get("/api/health", async (_req, res) => {
     agent: agentStatus(),
     models,
     bridge: config.bridge.url,
+    revit: {
+      connected: await bridgeAlive(),
+      autoStart: config.revit.autoStart,
+      exe: findRevitExe(),
+    },
     outDir: config.dirs.out,
     queueDir: config.dirs.queue,
   });
@@ -153,6 +159,12 @@ app.post("/api/build", async (req, res) => {
   }
 
   try {
+    const bridge = await ensureBridge();
+    if (!bridge.ok) {
+      res.status(503).json({ ok: false, mode: "unavailable", error: bridge.error });
+      return;
+    }
+
     const result = await buildFamily(analysis.spec);
     res.json(result);
   } catch (error) {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   analyzeSpec,
   paramKey,
@@ -46,6 +46,35 @@ interface ToastState {
   tone: "ok" | "warn" | "error";
 }
 
+const DEFAULT_LEFT_WIDTH = 322;
+const DEFAULT_RIGHT_WIDTH = 342;
+const MIN_LEFT_WIDTH = 240;
+const MAX_LEFT_WIDTH = 560;
+const MIN_RIGHT_WIDTH = 270;
+const MAX_RIGHT_WIDTH = 620;
+const MIN_VIEWER_WIDTH = 420;
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function readStoredWidth(key: string, fallback: number): number {
+  try {
+    const stored = Number(window.localStorage.getItem(key));
+    return Number.isFinite(stored) && stored > 0 ? stored : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function storeWidth(key: string, value: number): void {
+  try {
+    window.localStorage.setItem(key, String(Math.round(value)));
+  } catch {
+    /* private mode, ignore */
+  }
+}
+
 export function App() {
   const [spec, setSpec] = useState<FamilySpec | null>(null);
   const [entries, setEntries] = useState<ChatEntry[]>([
@@ -79,6 +108,63 @@ export function App() {
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [savedList, setSavedList] = useState<SavedModelMeta[]>([]);
   const abortRef = useRef<AbortController | null>(null);
+  const [leftWidth, setLeftWidth] = useState(() => readStoredWidth("fa.leftWidth", DEFAULT_LEFT_WIDTH));
+  const [rightWidth, setRightWidth] = useState(() =>
+    readStoredWidth("fa.rightWidth", DEFAULT_RIGHT_WIDTH),
+  );
+
+  useEffect(() => {
+    storeWidth("fa.leftWidth", leftWidth);
+  }, [leftWidth]);
+
+  useEffect(() => {
+    storeWidth("fa.rightWidth", rightWidth);
+  }, [rightWidth]);
+
+  const beginResize = (
+    side: "left" | "right",
+    event: { clientX: number; button: number; preventDefault: () => void },
+  ) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+
+    const startX = event.clientX;
+    const startLeft = leftWidth;
+    const startRight = rightWidth;
+
+    const onMove = (moveEvent: PointerEvent) => {
+      const delta = moveEvent.clientX - startX;
+
+      if (side === "left") {
+        const available = window.innerWidth - startRight - MIN_VIEWER_WIDTH - 12;
+        setLeftWidth(clamp(startLeft + delta, MIN_LEFT_WIDTH, Math.min(MAX_LEFT_WIDTH, available)));
+      } else {
+        const available = window.innerWidth - startLeft - MIN_VIEWER_WIDTH - 12;
+        setRightWidth(
+          clamp(startRight - delta, MIN_RIGHT_WIDTH, Math.min(MAX_RIGHT_WIDTH, available)),
+        );
+      }
+    };
+
+    const onUp = () => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      document.body.classList.remove("resizing");
+    };
+
+    document.body.classList.add("resizing");
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+  };
+
+  const nudgeWidth = (side: "left" | "right", key: "ArrowLeft" | "ArrowRight") => {
+    const step = key === "ArrowRight" ? 16 : -16;
+    if (side === "left") {
+      setLeftWidth((width) => clamp(width + step, MIN_LEFT_WIDTH, MAX_LEFT_WIDTH));
+    } else {
+      setRightWidth((width) => clamp(width - step, MIN_RIGHT_WIDTH, MAX_RIGHT_WIDTH));
+    }
+  };
 
   const analysis = useMemo(() => (spec ? analyzeSpec(spec) : null), [spec]);
 
@@ -264,6 +350,11 @@ export function App() {
   const handleBuild = async () => {
     if (!spec || !analysis?.ok || building) return;
     setBuilding(true);
+    setToast({
+      text: "Đang build family trong Revit…",
+      sub: "Nếu Revit chưa mở, hệ thống sẽ tự khởi động (khoảng 1 phút). File .rfa sẽ tự tải về khi xong.",
+      tone: "ok",
+    });
     try {
       const result = await buildFamily({ ...spec, revitVersion });
       if (result.ok && result.path) {
@@ -611,7 +702,15 @@ export function App() {
         onLoadDemo={handleLoadDemo}
       />
 
-      <div className="workspace">
+      <div
+        className="workspace"
+        style={
+          {
+            "--left-width": `${leftWidth}px`,
+            "--right-width": `${rightWidth}px`,
+          } as CSSProperties
+        }
+      >
         <ChatPanel
           entries={entries}
           running={running}
@@ -637,6 +736,22 @@ export function App() {
           uploading={uploading}
           onAttach={handleAttach}
           onRemoveAttachment={handleRemoveAttachment}
+        />
+
+        <div
+          className="resizer"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize the agent panel"
+          tabIndex={0}
+          title="Drag to resize · double-click to reset"
+          onPointerDown={(event) => beginResize("left", event)}
+          onDoubleClick={() => setLeftWidth(DEFAULT_LEFT_WIDTH)}
+          onKeyDown={(event) => {
+            if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+            event.preventDefault();
+            nudgeWidth("left", event.key);
+          }}
         />
 
         <Viewer
@@ -666,6 +781,22 @@ export function App() {
               ? { stage: stage.stage, message: stage.message, elapsed: elapsedLabel }
               : null
           }
+        />
+
+        <div
+          className="resizer"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize the parameter panel"
+          tabIndex={0}
+          title="Drag to resize · double-click to reset"
+          onPointerDown={(event) => beginResize("right", event)}
+          onDoubleClick={() => setRightWidth(DEFAULT_RIGHT_WIDTH)}
+          onKeyDown={(event) => {
+            if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+            event.preventDefault();
+            nudgeWidth("right", event.key);
+          }}
         />
 
         {spec && analysis ? (

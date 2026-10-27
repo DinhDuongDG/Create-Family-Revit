@@ -37,6 +37,7 @@ namespace FamilyAgent.Addin
                 var spec = SpecLoader.Load(json);
                 var parameters = ParameterResolver.Resolve(spec);
                 var model = GeometryResolver.Resolve(spec, parameters);
+                var materials = MaterialLookup(spec);
                 result.Warnings.AddRange(model.Warnings);
 
                 if (model.Parts.Count == 0)
@@ -53,7 +54,7 @@ namespace FamilyAgent.Addin
                     var manager = document.FamilyManager;
                     CreateFamilyType(manager, spec);
                     CreateParameters(document, manager, parameters, result.Warnings);
-                    var created = CreateGeometry(document, model, result.Warnings);
+                    var created = CreateGeometry(document, model, materials, result.Warnings);
 
                     transaction.Commit();
 
@@ -72,6 +73,8 @@ namespace FamilyAgent.Addin
                         elapsedMs = (int)(DateTime.UtcNow - started).TotalMilliseconds,
                     };
                 }
+
+                PrepareViews(document);
 
                 var directory = OutputDirectory();
                 Directory.CreateDirectory(directory);
@@ -96,6 +99,36 @@ namespace FamilyAgent.Addin
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// Templates open their 3D view in hidden line, which makes a solid family read as
+        /// a wireframe. Save it shaded so the built family matches the studio preview.
+        /// </summary>
+        private static void PrepareViews(Document document)
+        {
+            try
+            {
+                using (var transaction = new Transaction(document, "Family Agent — prepare views"))
+                {
+                    transaction.Start();
+
+                    foreach (var view in new FilteredElementCollector(document)
+                                 .OfClass(typeof(View3D))
+                                 .Cast<View3D>()
+                                 .Where(candidate => !candidate.IsTemplate && candidate.CanBePrinted))
+                    {
+                        view.DisplayStyle = DisplayStyle.ShadingWithEdges;
+                        view.DetailLevel = ViewDetailLevel.Fine;
+                    }
+
+                    transaction.Commit();
+                }
+            }
+            catch
+            {
+                // View setup is cosmetic; never fail a build because of it.
+            }
         }
 
         // ------------------------------------------------------------ parameters
@@ -131,11 +164,16 @@ namespace FamilyAgent.Addin
 
                 try
                 {
-                    var familyParameter = manager.AddParameter(
-                        parameter.Name,
-                        GroupFor(parameter.Group),
-                        SpecFor(parameter.Type),
-                        parameter.Instance);
+                    var familyParameter = FindParameter(manager, parameter.Name);
+
+                    if (familyParameter == null)
+                    {
+                        familyParameter = manager.AddParameter(
+                            parameter.Name,
+                            GroupFor(parameter.Group),
+                            SpecFor(parameter.Type),
+                            parameter.Instance);
+                    }
 
                     if (familyParameter == null)
                     {
@@ -150,6 +188,19 @@ namespace FamilyAgent.Addin
                     warnings.Add($"Parameter \"{parameter.Name}\" was not created: {ex.Message}");
                 }
             }
+        }
+
+        private static Autodesk.Revit.DB.FamilyParameter FindParameter(FamilyManager manager, string name)
+        {
+            foreach (Autodesk.Revit.DB.FamilyParameter parameter in manager.Parameters)
+            {
+                if (string.Equals(parameter.Definition?.Name, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    return parameter;
+                }
+            }
+
+            return null;
         }
 
         private static void ApplyValue(
@@ -216,7 +267,7 @@ namespace FamilyAgent.Addin
         {
             switch ((group ?? string.Empty).Trim().ToLowerInvariant())
             {
-                case "dimensions": return GroupTypeId.Length;
+                case "dimensions": return GroupTypeId.Geometry;
                 case "constraints": return GroupTypeId.Constraints;
                 case "identity data": return GroupTypeId.IdentityData;
                 case "graphics": return GroupTypeId.Graphics;
@@ -253,7 +304,11 @@ namespace FamilyAgent.Addin
 
         // -------------------------------------------------------------- geometry
 
-        private static int CreateGeometry(Document document, ResolvedModel model, List<string> warnings)
+        private static int CreateGeometry(
+            Document document,
+            ResolvedModel model,
+            IDictionary<string, MaterialDef> materials,
+            List<string> warnings)
         {
             var created = 0;
 
@@ -307,7 +362,9 @@ namespace FamilyAgent.Addin
                             // Free form elements do not always accept a name.
                         }
 
-                        AssignMaterial(document, element, part.Material, warnings);
+                        var materialName = MaterialName(part, materials);
+                        var color = MaterialColor(part, materials);
+                        AssignMaterial(document, element, materialName, color, warnings);
                         created += 1;
                     }
                 }
@@ -351,7 +408,7 @@ namespace FamilyAgent.Addin
             if (width <= 0 || depth <= 0 || height <= 0)
                 throw new InvalidOperationException("box has a zero dimension");
 
-            var profile = RectLoop(new XYZ(-width / 2, -depth / 2, 0), width, depth);
+            var profile = RectLoop(XYZ.Zero, width, depth);
             Solid result = GeometryCreationUtilities.CreateExtrusionGeometry(
                 new List<CurveLoop> { profile }, XYZ.BasisZ, height);
 
@@ -500,13 +557,49 @@ namespace FamilyAgent.Addin
 
         // ------------------------------------------------------------- materials
 
-        private static void AssignMaterial(Document document, Element element, string name, List<string> warnings)
+        private static IDictionary<string, MaterialDef> MaterialLookup(FamilySpec spec)
+        {
+            var lookup = new Dictionary<string, MaterialDef>(StringComparer.OrdinalIgnoreCase);
+            foreach (var material in spec.Materials ?? new List<MaterialDef>())
+            {
+                if (string.IsNullOrWhiteSpace(material?.Name)) continue;
+                if (!lookup.ContainsKey(material.Name)) lookup.Add(material.Name, material);
+            }
+            return lookup;
+        }
+
+        private static string MaterialName(ResolvedPart part, IDictionary<string, MaterialDef> materials)
+        {
+            if (!string.IsNullOrWhiteSpace(part.Material)) return part.Material;
+            if (!string.IsNullOrWhiteSpace(part.Color)) return part.Name;
+            return null;
+        }
+
+        private static string MaterialColor(ResolvedPart part, IDictionary<string, MaterialDef> materials)
+        {
+            if (!string.IsNullOrWhiteSpace(part.Color)) return part.Color;
+
+            if (!string.IsNullOrWhiteSpace(part.Material) &&
+                materials.TryGetValue(part.Material, out var material))
+            {
+                return material.Color;
+            }
+
+            return null;
+        }
+
+        private static void AssignMaterial(
+            Document document,
+            Element element,
+            string name,
+            string color,
+            List<string> warnings)
         {
             if (string.IsNullOrWhiteSpace(name)) return;
 
             try
             {
-                var material = FindOrCreateMaterial(document, name, warnings);
+                var material = FindOrCreateMaterial(document, name, color, warnings);
                 if (material == null) return;
 
                 var parameter = element.get_Parameter(BuiltInParameter.MATERIAL_ID_PARAM);
@@ -519,23 +612,67 @@ namespace FamilyAgent.Addin
             }
         }
 
-        private static Material FindOrCreateMaterial(Document document, string name, List<string> warnings)
+        private static Material FindOrCreateMaterial(
+            Document document,
+            string name,
+            string color,
+            List<string> warnings)
         {
             var existing = new FilteredElementCollector(document)
                 .OfClass(typeof(Material))
                 .Cast<Material>()
                 .FirstOrDefault(material => string.Equals(material.Name, name, StringComparison.OrdinalIgnoreCase));
-            if (existing != null) return existing;
+
+            var material = existing;
+
+            if (material == null)
+            {
+                try
+                {
+                    var id = Material.Create(document, name);
+                    material = document.GetElement(id) as Material;
+                }
+                catch (Exception ex)
+                {
+                    warnings.Add($"Material \"{name}\" could not be created: {ex.Message}");
+                    return null;
+                }
+            }
+
+            if (material != null) ApplyColor(material, color, warnings);
+            return material;
+        }
+
+        private static void ApplyColor(Material material, string hex, List<string> warnings)
+        {
+            if (string.IsNullOrWhiteSpace(hex)) return;
+
+            var value = hex.Trim().TrimStart('#');
+            if (value.Length == 3)
+            {
+                value = new string(new[]
+                {
+                    value[0], value[0], value[1], value[1], value[2], value[2],
+                });
+            }
+
+            if (value.Length != 6 ||
+                !int.TryParse(value, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var rgb))
+            {
+                warnings.Add($"Material \"{material.Name}\" color \"{hex}\" is not a hex value");
+                return;
+            }
 
             try
             {
-                var id = Material.Create(document, name);
-                return document.GetElement(id) as Material;
+                material.Color = new Color(
+                    (byte)((rgb >> 16) & 0xFF),
+                    (byte)((rgb >> 8) & 0xFF),
+                    (byte)(rgb & 0xFF));
             }
             catch (Exception ex)
             {
-                warnings.Add($"Material \"{name}\" could not be created: {ex.Message}");
-                return null;
+                warnings.Add($"Material \"{material.Name}\" color: {ex.Message}");
             }
         }
 
