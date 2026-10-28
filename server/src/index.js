@@ -58,6 +58,12 @@ app.post("/api/upload", (req, res) => {
   }
 });
 
+// Cheap liveness probe: the studio polls this while waiting, /api/health is too heavy
+// (it enumerates the CLI models and pings the Revit bridge).
+app.get("/api/ping", (_req, res) => {
+  res.json({ ok: true, agent: agentStatus(), time: Date.now() });
+});
+
 app.get("/api/health", async (_req, res) => {
   const models = await getCmdcModels();
   res.json({
@@ -115,6 +121,7 @@ app.post("/api/design", async (req, res) => {
     const result = await design({
       prompt,
       currentSpec: req.body?.spec ?? null,
+      lod: req.body?.lod,
       model: typeof req.body?.model === "string" && req.body.model.trim() ? req.body.model.trim() : undefined,
       attachments: normalizeAttachments(req.body?.attachments),
       signal: controller.signal,

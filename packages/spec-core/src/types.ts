@@ -134,6 +134,8 @@ export interface FamilySpec {
   template?: string;
   units: "mm";
   revitVersion?: string;
+  /** Level of detail the family was designed for. */
+  lod?: 200 | 300 | 350 | 400;
   description?: string;
   parameters: FamilyParameter[];
   parts: FamilyPart[];

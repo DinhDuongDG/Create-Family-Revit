@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   analyzeSpec,
   paramKey,
@@ -12,11 +12,12 @@ import fcuExampleRaw from "../../spec/examples/fcu-080.json";
 import pumpExampleRaw from "../../spec/examples/pump-dn80.json";
 import { ChatPanel, type ChatEntry } from "./components/ChatPanel";
 import { ParameterPanel } from "./components/ParameterPanel";
-import { TopBar } from "./components/TopBar";
+import { TopBar, type AgentPill } from "./components/TopBar";
 import { Viewer } from "./components/Viewer";
 import {
   buildFamily,
   fetchHealth,
+  pingServer,
   streamDesign,
   uploadDocument,
   fetchSavedModels,
@@ -24,6 +25,7 @@ import {
   saveModel,
   deleteSavedModel,
   type Health,
+  type Lod,
   type UploadedDocument,
   type SavedModelMeta,
 } from "./lib/api";
@@ -75,6 +77,17 @@ function storeWidth(key: string, value: number): void {
   }
 }
 
+const LOD_LEVELS: Lod[] = [200, 300, 350, 400];
+
+function readStoredLod(): Lod {
+  try {
+    const stored = Number(window.localStorage.getItem("fa.lod"));
+    return LOD_LEVELS.includes(stored as Lod) ? (stored as Lod) : 300;
+  } catch {
+    return 300;
+  }
+}
+
 export function App() {
   const [spec, setSpec] = useState<FamilySpec | null>(null);
   const [entries, setEntries] = useState<ChatEntry[]>([
@@ -92,17 +105,21 @@ export function App() {
   const [native, setNative] = useState(false);
   const [units, setUnits] = useState<Units>("mm");
   const [revitVersion, setRevitVersion] = useState("2024");
+  const [lod, setLod] = useState<Lod>(readStoredLod);
   const [model, setModel] = useState("");
   const [attachments, setAttachments] = useState<UploadedDocument[]>([]);
   const [uploading, setUploading] = useState(false);
   const [showGrid, setShowGrid] = useState(true);
-  const [showPlanes, setShowPlanes] = useState(false);
+  const [showPlanes, setShowPlanes] = useState(true);
   const [showConnectors, setShowConnectors] = useState(false);
   const [showHandles, setShowHandles] = useState(false);
   const [selectedPartId, setSelectedPartId] = useState<string | null>(null);
   const [hiddenPartIds, setHiddenPartIds] = useState<string[]>([]);
   const [transparentPartIds, setTransparentPartIds] = useState<string[]>([]);
   const [health, setHealth] = useState<Health | null>(null);
+  const [serverOnline, setServerOnline] = useState<boolean | null>(null);
+  const [agentReady, setAgentReady] = useState<boolean | null>(null);
+  const [lastBeatAt, setLastBeatAt] = useState<number | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [currentModelId, setCurrentModelId] = useState<string | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
@@ -168,13 +185,41 @@ export function App() {
 
   const analysis = useMemo(() => (spec ? analyzeSpec(spec) : null), [spec]);
 
+  // Typing in a parameter field re-solves the geometry; defer it so the input stays smooth.
+  const deferredModel = useDeferredValue(analysis?.model ?? null);
+  const deferredParameters = useDeferredValue(spec?.parameters);
+
   useEffect(() => {
     let alive = true;
-    fetchHealth().then((result) => {
-      if (alive) setHealth(result);
+
+    // Heavy endpoint: only once, for the model list.
+    void fetchHealth().then((result) => {
+      if (!alive || !result) return;
+      setHealth(result);
+      if (result.agent?.model && result.agent.model.startsWith("agy:")) {
+        setModel(result.agent.model);
+      } else if (result.models && result.models.length > 0) {
+        const firstAgy = result.models.find((m) => m.id.startsWith("agy:"));
+        if (firstAgy) setModel((curr) => curr || firstAgy.id);
+      }
     });
+
+    const probe = async () => {
+      const ping = await pingServer();
+      if (!alive) return;
+      setServerOnline(Boolean(ping?.ok));
+      if (ping) setAgentReady(Boolean(ping.agent?.ready));
+    };
+
+    void probe();
+    const timer = window.setInterval(probe, 5000);
+    const onFocus = () => void probe();
+    window.addEventListener("focus", onFocus);
+
     return () => {
       alive = false;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
     };
   }, []);
 
@@ -186,6 +231,33 @@ export function App() {
 
   const elapsed = runStartedAt ? Math.max(0, Math.floor((now - runStartedAt) / 1000)) : 0;
   const elapsedLabel = running && runStartedAt ? `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, "0")}` : null;
+
+  const beatAge = lastBeatAt ? Math.max(0, Math.floor((now - lastBeatAt) / 1000)) : null;
+  const beatLabel = beatAge === null ? "" : beatAge < 1 ? "vừa xong" : `${beatAge}s trước`;
+
+  const agentStatus: AgentPill = serverOnline === false
+    ? {
+        tone: "error",
+        text: "Mất kết nối server",
+        hint: "API 8787 không phản hồi — kiểm tra `npm run dev` rồi thử lại.",
+      }
+    : running
+      ? beatAge !== null && beatAge > 25
+        ? {
+            tone: "warn",
+            text: `Đang chờ · ${elapsedLabel ?? ""}`.trim(),
+            hint: `Không có phản hồi từ server ${beatAge}s. Agent có thể đang suy nghĩ rất lâu hoặc đã treo — bấm Stop nếu quá 10 phút.`,
+          }
+        : {
+            tone: "ok",
+            text: `Agent đang chạy · ${elapsedLabel ?? ""}`.trim(),
+            hint: `Server còn sống · nhịp cuối ${beatLabel}`,
+          }
+      : agentReady
+        ? { tone: "ok", text: "Agent sẵn sàng", hint: health?.agent?.detail }
+        : agentReady === false
+          ? { tone: "warn", text: "Agent chưa sẵn sàng", hint: health?.agent?.detail }
+          : { tone: "warn", text: "Đang kiểm tra server…", hint: "Chưa nhận được phản hồi từ API 8787." };
 
   useEffect(() => {
     if (!toast) return;
@@ -221,6 +293,23 @@ export function App() {
     setAttachments((current) => current.filter((_, idx) => idx !== index));
   };
 
+  const handleLod = (value: Lod) => {
+    setLod(value);
+    try {
+      window.localStorage.setItem("fa.lod", String(value));
+    } catch {
+      /* private mode, ignore */
+    }
+
+    if (spec) {
+      setToast({
+        text: `Đã chọn LOD ${value}`,
+        sub: "Yêu cầu chỉnh sửa tiếp theo sẽ dựng lại mô hình ở mức chi tiết này.",
+        tone: "ok",
+      });
+    }
+  };
+
   const handleSend = async (text: string) => {
     if (running || uploading) return;
     const hadSpec = Boolean(spec);
@@ -236,12 +325,14 @@ export function App() {
 
     const controller = new AbortController();
     abortRef.current = controller;
+    setLastBeatAt(Date.now());
 
     try {
       await streamDesign(
         {
           prompt: text,
           spec,
+          lod,
           model: model || undefined,
           attachments: docs.length > 0 ? docs.map((d) => ({ path: d.path, name: d.name })) : undefined,
         },
@@ -265,13 +356,14 @@ export function App() {
 
           pushEntry({
             role: "agent",
-            text: `${hadSpec ? "Updated" : "Built"} ${event.spec.name}.\n${stats.parts} parts · ${stats.parameters} parameters${dims ? ` · ${dims}` : ""}`,
+            text: `${hadSpec ? "Đã cập nhật" : "Đã tạo"} ${event.spec.name}.\n${stats.parts} chi tiết · ${stats.parameters} tham số${stats.lod ? ` · LOD ${stats.lod}` : ""}${dims ? ` · ${dims}` : ""}`,
             notes: event.spec.notes,
-            meta: `${formatDuration(stats.elapsedMs)}${stats.attempts > 1 ? ` · ${stats.attempts} passes` : ""}`,
+            meta: `${formatDuration(stats.elapsedMs)}${stats.attempts > 1 ? ` · ${stats.attempts} lượt` : ""}`,
             issues: [...event.errors, ...event.issues.filter((issue) => issue.severity === "warning")].slice(0, 12),
           });
         },
         controller.signal,
+        () => setLastBeatAt(Date.now()),
       );
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") {
@@ -279,6 +371,8 @@ export function App() {
       } else {
         const message = error instanceof Error ? error.message : String(error);
         pushEntry({ role: "agent", text: message, tone: "error" });
+        // Find out right away whether the API itself is down.
+        void pingServer().then((ping) => setServerOnline(Boolean(ping?.ok)));
       }
     } finally {
       abortRef.current = null;
@@ -359,10 +453,31 @@ export function App() {
       const result = await buildFamily({ ...spec, revitVersion });
       if (result.ok && result.path) {
         setNative(true);
+
+        const driving = result.stats?.driving ?? [];
+        const unlabelled = result.stats?.unlabelled ?? [];
+        const notes = [
+          ...(result.warnings ?? []),
+          ...unlabelled.map((item) => `Chưa dẫn động: ${item}`),
+        ].slice(0, 8);
+
+        pushEntry({
+          role: "agent",
+          text:
+            `Đã xuất ${spec.name}.rfa (Revit ${result.revitVersion ?? revitVersion}).\n` +
+            `${driving.length} tham số dẫn động · ${result.stats?.locks ?? 0} ràng buộc hình học` +
+            `${result.stats?.refPlanes ? ` · ${result.stats.refPlanes} reference plane` : ""}`,
+          notes: notes.length > 0 ? notes : undefined,
+          meta: result.path,
+          tone: driving.length === 0 ? "error" : undefined,
+        });
+
         setToast({
           text: "Revit family built successfully!",
-          sub: result.path,
-          tone: "ok",
+          sub: driving.length === 0
+            ? "Cảnh báo: chưa có tham số nào được gắn nhãn dimension — đổi thông số sẽ không đổi hình."
+            : `${driving.length} tham số dẫn động hình học · ${result.path}`,
+          tone: driving.length === 0 ? "warn" : "ok",
         });
         // Automatically trigger download of the .rfa file
         const link = document.createElement("a");
@@ -433,6 +548,7 @@ export function App() {
       if (detail && detail.spec) {
         setSpec(detail.spec);
         setCurrentModelId(detail.id);
+        if (detail.spec.lod) handleLod(detail.spec.lod);
         if (Array.isArray(detail.entries) && detail.entries.length > 0) {
           setEntries(detail.entries);
         } else {
@@ -689,10 +805,13 @@ export function App() {
         native={native}
         running={running}
         agentStage={stage?.stage ?? null}
+        agentStatus={agentStatus}
         units={units}
         onUnits={setUnits}
         revitVersion={revitVersion}
         onRevitVersion={setRevitVersion}
+        lod={lod}
+        onLod={handleLod}
         onBuild={handleBuild}
         canBuild={Boolean(analysis?.ok)}
         building={building}
@@ -755,8 +874,8 @@ export function App() {
         />
 
         <Viewer
-          model={analysis?.model ?? null}
-          parameters={spec?.parameters}
+          model={deferredModel}
+          parameters={deferredParameters}
           materials={spec?.materials ?? []}
           units={units}
           showGrid={showGrid}

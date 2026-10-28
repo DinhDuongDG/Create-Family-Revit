@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text;
 using Autodesk.Revit.ApplicationServices;
 using Autodesk.Revit.DB;
+using Autodesk.Revit.UI;
 using FamilyAgent.Core;
 using CoreParameterSet = FamilyAgent.Core.ParameterSet;
 
@@ -26,11 +27,140 @@ namespace FamilyAgent.Addin
         private const double MmPerFoot = 304.8;
         private const double DegToRad = Math.PI / 180.0;
 
+        /// <summary>
+        /// Diagnostic: opens a built .rfa, changes one parameter and reports whether the
+        /// geometry rebuilt. Proves the constraints really flex in the saved file.
+        /// </summary>
+        public static object Inspect(UIApplication uiApp, string path, string parameter, double percent)
+        {
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+                throw new FileNotFoundException("Family not found", path);
+
+            // Headless open: the document can be closed reliably, unlike a UI tab opened
+            // with OpenAndActivateDocument which keeps the .rfa locked for the next build.
+            var document = uiApp.Application.OpenDocumentFile(path);
+
+            try
+            {
+                var manager = document.FamilyManager;
+                var planes = new FilteredElementCollector(document)
+                    .OfClass(typeof(ReferencePlane))
+                    .Cast<ReferencePlane>()
+                    .ToList();
+                var dimensions = new FilteredElementCollector(document)
+                    .OfClass(typeof(Dimension))
+                    .Cast<Dimension>()
+                    .ToList();
+
+                var labelled = 0;
+                var labelledNames = new List<string>();
+                foreach (var dimension in dimensions)
+                {
+                    try
+                    {
+                        var label = dimension.FamilyLabel;
+                        if (label == null) continue;
+                        labelled += 1;
+                        labelledNames.Add(label.Definition?.Name ?? "?");
+                    }
+                    catch
+                    {
+                        // Some dimension types cannot carry a label.
+                    }
+                }
+
+                var parameterNames = new List<string>();
+                foreach (Autodesk.Revit.DB.FamilyParameter candidate in manager.Parameters)
+                {
+                    try
+                    {
+                        if (candidate.Definition != null) parameterNames.Add(candidate.Definition.Name);
+                    }
+                    catch
+                    {
+                        // Ignore stale parameters.
+                    }
+                }
+
+                var familyParameter = FindParameter(manager, parameter);
+                if (familyParameter == null)
+                {
+                    return new
+                    {
+                        ok = false,
+                        error = $"Parameter \"{parameter}\" not found in {Path.GetFileName(path)}",
+                        planes = planes.Count,
+                        dimensions = dimensions.Count,
+                        labelled,
+                        labelledNames,
+                        parameterNames,
+                        pinned = planes.Count(plane => plane.Pinned),
+                    };
+                }
+
+                var current = document.FamilyManager.CurrentType?.AsDouble(familyParameter) ?? 0;
+                var before = ModelSignature(document);
+                var moved = false;
+                var commit = "n/a";
+
+                using (var transaction = new Transaction(document, "Family Agent — inspect"))
+                {
+                    transaction.Start();
+                    manager.Set(familyParameter, current * (1.0 + percent / 100.0) + 0.001);
+                    document.Regenerate();
+                    moved = Math.Abs(before - ModelSignature(document)) > 1e-9;
+                    commit = transaction.RollBack().ToString();
+                }
+
+                return new
+                {
+                    ok = true,
+                    parameter,
+                    valueMm = Math.Round(current * MmPerFoot, 1),
+                    percent,
+                    commit,
+                    moved,
+                    planes = planes.Count,
+                    pinned = planes.Count(plane => plane.Pinned),
+                    dimensions = dimensions.Count,
+                    labelled,
+                    labelledNames,
+                    parameterNames,
+                };
+            }
+            finally
+            {
+                try
+                {
+                    document.Close(false);
+                }
+                catch
+                {
+                    // Fall through to the UI close below.
+                }
+
+                try
+                {
+                    var stillOpen = uiApp.Application.Documents
+                        .Cast<Document>()
+                        .Any(open => string.Equals(open.PathName, path, StringComparison.OrdinalIgnoreCase));
+
+                    if (stillOpen) uiApp.ActiveUIDocument?.SaveAndClose();
+                }
+                catch
+                {
+                    // Leave it open rather than crash the inspect.
+                }
+            }
+        }
+
         public static BuildResult Build(Application app, string json)
         {
             var started = DateTime.UtcNow;
             var result = new BuildResult { RevitVersion = app.VersionNumber };
             Document document = null;
+            var stage = "reading the spec";
+            var buildFailures = new FailureCollector();
 
             try
             {
@@ -44,37 +174,70 @@ namespace FamilyAgent.Addin
                     throw new InvalidOperationException(
                         "No geometry could be resolved from the spec. " + string.Join(" ", model.Warnings));
 
+                stage = "opening the family template";
                 var template = TemplateCatalog.Resolve(app, spec);
                 document = app.NewFamilyDocument(template);
 
-                using (var transaction = new Transaction(document, "Family Agent — build family"))
+                PlaneSkeleton skeleton;
+                List<Element> forms;
+
+                stage = "building the family";
+                using (var transaction = SilentTransaction(document, "Family Agent — build family", buildFailures))
                 {
                     transaction.Start();
 
                     var manager = document.FamilyManager;
                     CreateFamilyType(manager, spec);
                     CreateParameters(document, manager, parameters, result.Warnings);
-                    var created = CreateGeometry(document, model, materials, result.Warnings);
+                    skeleton = CreateReferencePlanes(document, manager, parameters, model, result.Warnings);
+                    forms = CreateGeometry(document, model, materials, result.Warnings);
 
-                    transaction.Commit();
-
-                    result.Stats = new
+                    var status = transaction.Commit();
+                    if (status != TransactionStatus.Committed)
                     {
-                        parts = model.Parts.Count,
-                        instances = model.Instances,
-                        solids = created,
-                        parameters = parameters.Ordered.Count,
-                        bounds = new
-                        {
-                            x = Math.Round(model.Bounds.Size.X),
-                            y = Math.Round(model.Bounds.Size.Y),
-                            z = Math.Round(model.Bounds.Size.Z),
-                        },
-                        elapsedMs = (int)(DateTime.UtcNow - started).TotalMilliseconds,
-                    };
+                        throw new InvalidOperationException(
+                            $"Revit rolled the family back ({status}): {string.Join(" ", buildFailures.Messages.Take(5))}");
+                    }
                 }
 
-                PrepareViews(document);
+                foreach (var message in buildFailures.Messages.Take(5)) result.Warnings.Add(message);
+
+                stage = "dimensioning the reference planes";
+                var refDimensions = CreateDimensions(document, skeleton.Dimensions, result.Warnings);
+
+                stage = "locking the geometry to the reference planes";
+                var locks = LockGeometry(document, skeleton, forms, result.Warnings);
+
+                if (Environment.GetEnvironmentVariable("FAMILY_AGENT_PROBE") == "1")
+                {
+                    stage = "self-checking the parameters";
+                    result.Warnings.Add("selfcheck: " + SelfCheck(document, skeleton, parameters));
+                }
+
+                result.Stats = new
+                {
+                    parts = model.Parts.Count,
+                    instances = model.Instances,
+                    forms = forms.Count(f => f is Extrusion),
+                    voids = forms.Count(f => f is Extrusion extrusion && !extrusion.IsSolid),
+                    refPlanes = skeleton.Created,
+                    refDimensions,
+                    locks,
+                    lod = spec.Lod,
+                    driving = skeleton.Driving,
+                    unlabelled = skeleton.Unlabelled,
+                    parameters = parameters.Ordered.Count,
+                    bounds = new
+                    {
+                        x = Math.Round(model.Bounds.Size.X),
+                        y = Math.Round(model.Bounds.Size.Y),
+                        z = Math.Round(model.Bounds.Size.Z),
+                    },
+                    elapsedMs = (int)(DateTime.UtcNow - started).TotalMilliseconds,
+                };
+
+                stage = "saving the family";
+                PrepareViews(document, spec.Lod);
 
                 var directory = OutputDirectory();
                 Directory.CreateDirectory(directory);
@@ -87,7 +250,10 @@ namespace FamilyAgent.Addin
             catch (Exception ex)
             {
                 result.Ok = false;
-                result.Error = ex.Message;
+                result.Error = $"{stage}: {ex.Message}" +
+                               (buildFailures.Messages.Count > 0
+                                   ? " (" + string.Join(" ", buildFailures.Messages.Take(3)) + ")"
+                                   : string.Empty);
             }
             finally
             {
@@ -103,10 +269,17 @@ namespace FamilyAgent.Addin
 
         /// <summary>
         /// Templates open their 3D view in hidden line, which makes a solid family read as
-        /// a wireframe. Save it shaded so the built family matches the studio preview.
+        /// a wireframe. Save it shaded so the built family matches the studio preview, and
+        /// follow the chosen LOD for the view detail level.
         /// </summary>
-        private static void PrepareViews(Document document)
+        private static void PrepareViews(Document document, int? lod)
         {
+            var detail = lod == 200
+                ? ViewDetailLevel.Coarse
+                : lod == 400
+                    ? ViewDetailLevel.Fine
+                    : ViewDetailLevel.Medium;
+
             try
             {
                 using (var transaction = new Transaction(document, "Family Agent — prepare views"))
@@ -119,7 +292,7 @@ namespace FamilyAgent.Addin
                                  .Where(candidate => !candidate.IsTemplate && candidate.CanBePrinted))
                     {
                         view.DisplayStyle = DisplayStyle.ShadingWithEdges;
-                        view.DetailLevel = ViewDetailLevel.Fine;
+                        view.DetailLevel = detail;
                     }
 
                     transaction.Commit();
@@ -302,70 +475,998 @@ namespace FamilyAgent.Addin
         private static bool IsType(string type, string expected) =>
             string.Equals(type ?? string.Empty, expected, StringComparison.OrdinalIgnoreCase);
 
+        // --------------------------------------------------------- reference planes
+
+        private enum PlaneAxis
+        {
+            X,
+            Y,
+            Z,
+        }
+
+        /// <summary>A reference plane that sits at a known coordinate on one axis.</summary>
+        private sealed class SkeletonPlane
+        {
+            public PlaneAxis Axis;
+            public double Coordinate;
+            public ReferencePlane Plane;
+            public bool Drives;
+        }
+
+        /// <summary>
+        /// Reference planes plus the dimensions that label them. Planes are placed on the
+        /// coordinates the model actually occupies, so a face can be locked onto them and the
+        /// labelled parameter really drives the solids.
+        /// </summary>
+        private sealed class PlaneSkeleton
+        {
+            public View Plan;
+            public View Elevation;
+            public int Created;
+            public readonly List<SkeletonPlane> Planes = new List<SkeletonPlane>();
+            public readonly List<PlaneDimension> Dimensions = new List<PlaneDimension>();
+            public readonly List<string> Driving = new List<string>();
+            public readonly List<string> Unlabelled = new List<string>();
+
+            public ReferencePlane Find(PlaneAxis axis, double coordinate)
+            {
+                SkeletonPlane best = null;
+                var bestDistance = 1.0 / MmPerFoot;
+
+                foreach (var candidate in Planes)
+                {
+                    if (candidate.Axis != axis) continue;
+
+                    var distance = Math.Abs(candidate.Coordinate - coordinate);
+                    if (distance > bestDistance) continue;
+
+                    best = candidate;
+                    bestDistance = distance;
+                }
+
+                return best?.Plane;
+            }
+
+            public bool Drives(PlaneAxis axis, double coordinate)
+            {
+                foreach (var candidate in Planes)
+                {
+                    if (candidate.Axis != axis || !candidate.Drives) continue;
+
+                    // Tight tolerance: an alignment needs the face to sit exactly on the plane,
+                    // a near miss makes NewAlignment throw "not geometrically aligned".
+                    if (Math.Abs(candidate.Coordinate - coordinate) <= 0.05 / MmPerFoot) return true;
+                }
+
+                return false;
+            }
+
+            public void Register(PlaneAxis axis, double coordinate, ReferencePlane plane, bool drives)
+            {
+                foreach (var candidate in Planes)
+                {
+                    if (candidate.Axis != axis) continue;
+                    if (Math.Abs(candidate.Coordinate - coordinate) > 1.0 / MmPerFoot) continue;
+
+                    candidate.Drives |= drives;
+                    return;
+                }
+
+                Planes.Add(new SkeletonPlane
+                {
+                    Axis = axis,
+                    Coordinate = coordinate,
+                    Plane = plane,
+                    Drives = drives,
+                });
+            }
+        }
+
+        /// <summary>Coordinates the resolved model actually occupies, in millimetres.</summary>
+        private sealed class CoordinateSet
+        {
+            private readonly Dictionary<PlaneAxis, List<double>> _values =
+                new Dictionary<PlaneAxis, List<double>>
+                {
+                    { PlaneAxis.X, new List<double>() },
+                    { PlaneAxis.Y, new List<double>() },
+                    { PlaneAxis.Z, new List<double>() },
+                };
+
+            public void Add(ResolvedSolid solid, Vec3d offset)
+            {
+                var bounds = GeometryResolver.BoundsOf(solid);
+                _values[PlaneAxis.X].Add(bounds.MinX + offset.X);
+                _values[PlaneAxis.X].Add(bounds.MaxX + offset.X);
+                _values[PlaneAxis.Y].Add(bounds.MinY + offset.Y);
+                _values[PlaneAxis.Y].Add(bounds.MaxY + offset.Y);
+                _values[PlaneAxis.Z].Add(bounds.MinZ + offset.Z);
+                _values[PlaneAxis.Z].Add(bounds.MaxZ + offset.Z);
+            }
+
+            public bool Has(PlaneAxis axis, double millimeters)
+            {
+                foreach (var value in _values[axis])
+                {
+                    if (Math.Abs(value - millimeters) <= 1) return true;
+                }
+
+                return false;
+            }
+
+            public int Count(PlaneAxis axis, double millimeters)
+            {
+                var count = 0;
+                foreach (var value in _values[axis])
+                {
+                    if (Math.Abs(value - millimeters) <= 1) count += 1;
+                }
+
+                return count;
+            }
+        }
+
+        private static CoordinateSet ModelCoordinates(ResolvedModel model)
+        {
+            var coordinates = new CoordinateSet();
+
+            foreach (var part in model.Parts)
+            {
+                for (var index = 0; index < Math.Max(1, part.ArrayCount); index += 1)
+                {
+                    coordinates.Add(part.Solid, ArrayOffsetMm(part, index));
+                }
+            }
+
+            return coordinates;
+        }
+
+        /// <summary>
+        /// Picks the axis a length parameter really measures along: the axis whose overall
+        /// size matches the value, then the axis with the most faces sitting on it. Guessing
+        /// from the name alone puts e.g. "Panel Thickness" on Z when the panels are thick in X.
+        /// </summary>
+        private static PlaneAxis ChooseAxis(
+            string name,
+            double millimetres,
+            ResolvedModel model,
+            CoordinateSet coordinates)
+        {
+            var preferred = AxisFor(name);
+            var order = new[] { preferred, PlaneAxis.X, PlaneAxis.Y, PlaneAxis.Z };
+
+            foreach (var axis in order)
+            {
+                var size = axis == PlaneAxis.X
+                    ? model.Bounds.Size.X
+                    : axis == PlaneAxis.Y
+                        ? model.Bounds.Size.Y
+                        : model.Bounds.Size.Z;
+
+                if (Math.Abs(size - millimetres) <= 1) return axis;
+            }
+
+            var best = preferred;
+            var bestCount = coordinates.Count(preferred, millimetres) + coordinates.Count(preferred, -millimetres);
+
+            foreach (var axis in order)
+            {
+                var count = coordinates.Count(axis, millimetres) + coordinates.Count(axis, -millimetres);
+                if (count > bestCount)
+                {
+                    best = axis;
+                    bestCount = count;
+                }
+            }
+
+            return best;
+        }
+
+        /// <summary>
+        /// Builds the reference-plane skeleton: centre planes, the base level, and one plane
+        /// per length parameter sitting on a real face where possible, dimensioned and
+        /// labelled so the parameter drives that plane.
+        /// </summary>
+        private static PlaneSkeleton CreateReferencePlanes(
+            Document document,
+            FamilyManager manager,
+            CoreParameterSet parameters,
+            ResolvedModel model,
+            List<string> warnings)
+        {
+            var skeleton = new PlaneSkeleton
+            {
+                Plan = FindView(document, ViewType.FloorPlan),
+                Elevation = FindView(document, ViewType.Elevation),
+            };
+
+            if (skeleton.Plan == null && skeleton.Elevation == null) return skeleton;
+            skeleton.Plan = skeleton.Plan ?? skeleton.Elevation;
+            skeleton.Elevation = skeleton.Elevation ?? skeleton.Plan;
+
+            var extent = Math.Max(Math.Max(model.Bounds.Size.X, model.Bounds.Size.Y), model.Bounds.Size.Z);
+            var half = Ft(Math.Max(extent * 0.7, 400));
+
+            var centerX = Ft(model.Bounds.IsValid ? (model.Bounds.MinX + model.Bounds.MaxX) / 2 : 0);
+            var centerY = Ft(model.Bounds.IsValid ? (model.Bounds.MinY + model.Bounds.MaxY) / 2 : 0);
+
+            var coordinates = ModelCoordinates(model);
+            var labelled = LabelledParameters(document);
+            var usedPairs = new HashSet<string>(StringComparer.Ordinal);
+
+            ReferencePlane Add(string name, PlaneAxis axis, double coordinate, View view, bool drives)
+            {
+                var existing = skeleton.Find(axis, coordinate);
+                if (existing != null)
+                {
+                    skeleton.Register(axis, coordinate, existing, drives);
+                    return existing;
+                }
+
+                try
+                {
+                    var plane = FindPlane(document, name) ??
+                                AddPlane(document, view, name, axis, coordinate, half);
+                    if (plane == null) return null;
+
+                    skeleton.Register(axis, coordinate, plane, drives);
+                    skeleton.Created += 1;
+                    return plane;
+                }
+                catch (Exception ex)
+                {
+                    warnings.Add($"Reference plane \"{name}\": {ex.Message}");
+                    return null;
+                }
+            }
+
+            void Dim(View view, ReferencePlane from, ReferencePlane to, XYZ start, XYZ end,
+                Autodesk.Revit.DB.FamilyParameter label)
+            {
+                if (view == null || from == null || to == null) return;
+
+                var key = $"{from.UniqueId}|{to.UniqueId}|{view.Id}";
+                if (!usedPairs.Add(key)) return;
+
+                skeleton.Dimensions.Add(new PlaneDimension(view, from, to, start, end, label));
+            }
+
+            var centerLeftRight = Add("Center (Left/Right)", PlaneAxis.X, 0, skeleton.Plan, false);
+            var centerFrontBack = Add("Center (Front/Back)", PlaneAxis.Y, 0, skeleton.Plan, false);
+            var baseLevel = Add("Ref. Level", PlaneAxis.Z, 0, skeleton.Elevation, false);
+
+            foreach (var parameter in parameters.Ordered)
+            {
+                if (!IsType(parameter.Type, "Length")) continue;
+                if (!string.IsNullOrEmpty(parameter.Error)) continue;
+                if (!parameter.Number.HasValue) continue;
+
+                var value = Math.Abs(parameter.Number.Value);
+                if (value < 1) continue;
+
+                var familyParameter = FindParameter(manager, parameter.Name);
+                var label = familyParameter != null &&
+                            string.IsNullOrWhiteSpace(parameter.Formula) &&
+                            labelled.Add(familyParameter.Id)
+                    ? familyParameter
+                    : null;
+
+                var axis = ChooseAxis(parameter.Name, value, model, coordinates);
+
+                if (label != null)
+                {
+                    skeleton.Driving.Add(parameter.Name);
+                }
+                else
+                {
+                    var reason = familyParameter == null
+                        ? "no such parameter"
+                        : parameter.Instance
+                            ? "instance parameter"
+                            : !string.IsNullOrWhiteSpace(parameter.Formula)
+                                ? "formula parameter"
+                                : "already driven";
+                    skeleton.Unlabelled.Add($"{parameter.Name} ({reason})");
+                }
+
+                if (axis == PlaneAxis.Z)
+                {
+                    var coordinate = Ft(value);
+                    var plane = Add(parameter.Name, axis, coordinate, skeleton.Elevation, label != null);
+                    if (plane != null)
+                    {
+                        Dim(skeleton.Elevation, baseLevel, plane, XYZ.Zero, new XYZ(0, 0, coordinate), label);
+                    }
+
+                    continue;
+                }
+
+                var sign = coordinates.Has(axis, value) ? 1
+                    : coordinates.Has(axis, -value) ? -1
+                    : 0;
+
+                if (sign != 0)
+                {
+                    // The parameter measures a real face from the datum: label that face.
+                    var coordinate = Ft(sign * value);
+                    var plane = Add(parameter.Name, axis, coordinate, skeleton.Plan, label != null);
+                    if (plane == null) continue;
+
+                    var datum = axis == PlaneAxis.X ? centerLeftRight : centerFrontBack;
+                    var from = axis == PlaneAxis.X
+                        ? new XYZ(0, centerY, 0)
+                        : new XYZ(centerX, 0, 0);
+                    var to = axis == PlaneAxis.X
+                        ? new XYZ(coordinate, centerY, 0)
+                        : new XYZ(centerX, coordinate, 0);
+
+                    Dim(skeleton.Plan, datum, plane, from, to, label);
+                    continue;
+                }
+
+                // Otherwise fall back to a symmetric pair around the model centre.
+                var center = axis == PlaneAxis.X ? centerX : centerY;
+                var lowOffset = center - Ft(value) / 2;
+                var highOffset = center + Ft(value) / 2;
+
+                var low = Add(
+                    axis == PlaneAxis.X ? $"{parameter.Name} Left" : $"{parameter.Name} Front",
+                    axis,
+                    lowOffset,
+                    skeleton.Plan,
+                    label != null);
+                var high = Add(
+                    axis == PlaneAxis.X ? $"{parameter.Name} Right" : $"{parameter.Name} Back",
+                    axis,
+                    highOffset,
+                    skeleton.Plan,
+                    label != null);
+
+                if (low == null || high == null) continue;
+
+                var lowPoint = axis == PlaneAxis.X
+                    ? new XYZ(lowOffset, centerY, 0)
+                    : new XYZ(centerX, lowOffset, 0);
+                var highPoint = axis == PlaneAxis.X
+                    ? new XYZ(highOffset, centerY, 0)
+                    : new XYZ(centerX, highOffset, 0);
+
+                Dim(skeleton.Plan, low, high, lowPoint, highPoint, label);
+            }
+
+            return skeleton;
+        }
+
+        /// <summary>
+        /// Wraps a transaction so Revit reports failures to us instead of stopping the
+        /// build with a modal dialog the bridge can never dismiss.
+        /// </summary>
+        private static Transaction SilentTransaction(
+            Document document,
+            string name,
+            FailureCollector collector)
+        {
+            var transaction = new Transaction(document, name);
+            var options = transaction.GetFailureHandlingOptions();
+            options.SetFailuresPreprocessor(collector);
+            options.SetForcedModalHandling(false);
+            options.SetClearAfterRollback(true);
+            transaction.SetFailureHandlingOptions(options);
+            return transaction;
+        }
+
+        private sealed class FailureCollector : IFailuresPreprocessor
+        {
+            public readonly List<string> Messages = new List<string>();
+
+            public FailureProcessingResult PreprocessFailures(FailuresAccessor failuresAccessor)
+            {
+                var result = FailureProcessingResult.Continue;
+
+                foreach (var failure in failuresAccessor.GetFailureMessages())
+                {
+                    var text = failure.GetDescriptionText();
+                    if (!string.IsNullOrWhiteSpace(text) && !Messages.Contains(text))
+                        Messages.Add(text);
+
+                    if (failure.GetSeverity() == FailureSeverity.Warning)
+                    {
+                        failuresAccessor.DeleteWarning(failure);
+                        continue;
+                    }
+
+                    // A severe error left unresolved would be shown in a modal dialog that the
+                    // bridge can never dismiss, hanging Revit. Roll the change back instead and
+                    // surface the text as a warning.
+                    result = FailureProcessingResult.ProceedWithRollBack;
+                }
+
+                return result;
+            }
+        }
+
+        /// <summary>
+        /// Dimensions are created once the planes are committed, so their references are
+        /// regenerated, and in a transaction that downgrades Revit's "cannot be ignored"
+        /// errors to a rollback instead of a modal dialog that would stall the bridge.
+        /// </summary>
+        private static int CreateDimensions(
+            Document document,
+            List<PlaneDimension> pending,
+            List<string> warnings)
+        {
+            if (pending == null || pending.Count == 0) return 0;
+
+            // Fast path: the whole skeleton in one transaction. Normally nothing fails and
+            // this is several times quicker than a subtransaction per dimension.
+            var fast = new FailureCollector();
+            var fastCreated = 0;
+
+            try
+            {
+                using (var transaction = SilentTransaction(document, "Family Agent — reference dimensions", fast))
+                {
+                    transaction.Start();
+
+                    var scratch = new List<string>();
+                    foreach (var dimension in pending)
+                    {
+                        if (dimension.Create(document, scratch)) fastCreated += 1;
+                    }
+
+                    if (transaction.Commit() == TransactionStatus.Committed) return fastCreated;
+                }
+            }
+            catch
+            {
+                // Fall through to the one-by-one path below.
+            }
+
+            var failures = new FailureCollector();
+            var created = 0;
+
+            try
+            {
+                using (var transaction = SilentTransaction(document, "Family Agent — reference dimensions", failures))
+                {
+                    transaction.Start();
+
+                    foreach (var dimension in pending)
+                    {
+                        // One transaction per dimension: a single unsatisfiable constraint then
+                        // drops only that dimension instead of the whole skeleton.
+                        try
+                        {
+                            using (var step = new SubTransaction(document))
+                            {
+                                step.Start();
+
+                                if (!dimension.Create(document, warnings))
+                                {
+                                    step.RollBack();
+                                    continue;
+                                }
+
+                                if (step.Commit() == TransactionStatus.Committed) created += 1;
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            warnings.Add($"Dimension \"{dimension.Name}\" was rejected: {ex.Message}");
+                        }
+                    }
+
+                    var status = transaction.Commit();
+                    if (status != TransactionStatus.Committed)
+                    {
+                        warnings.Add(
+                            $"Reference dimensions were rolled back ({status}): {string.Join(" ", failures.Messages.Take(3))}");
+                        return 0;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                warnings.Add($"Reference dimensions stopped: {ex.Message}");
+            }
+
+            foreach (var message in failures.Messages.Take(3)) warnings.Add(message);
+            return created;
+        }
+
+        /// <summary>
+        /// Locks each solid to at most one driven plane per axis — the face furthest from the
+        /// form's own centre. NewAlignment returns a locked dimension, so moving a labelled
+        /// plane drags the face with it; locking both opposite faces to two independent
+        /// parameters lets them cross and Revit refuses to rebuild the extrusion.
+        /// </summary>
+        private static int LockGeometry(
+            Document document,
+            PlaneSkeleton skeleton,
+            IList<Element> forms,
+            List<string> warnings)
+        {
+            if (forms == null || forms.Count == 0) return 0;
+            if (skeleton.Plan == null && skeleton.Elevation == null) return 0;
+
+            var options = new Options { ComputeReferences = true, DetailLevel = ViewDetailLevel.Fine };
+            var failures = new FailureCollector();
+            var locked = 0;
+
+            using (var transaction = SilentTransaction(document, "Family Agent — lock geometry", failures))
+            {
+                transaction.Start();
+
+                foreach (var form in forms)
+                {
+                    // Voids are cutters: constraining them makes Revit fail to rebuild the
+                    // cut ("Can't make Extrusion") as soon as a driving parameter moves.
+                    var solidForm = form as Extrusion;
+                    if (solidForm == null || !solidForm.IsSolid) continue;
+
+                    var faces = new List<FaceCandidate>();
+                    CollectFaces(form, options, skeleton, faces);
+
+                    foreach (PlaneAxis axis in new[] { PlaneAxis.X, PlaneAxis.Y, PlaneAxis.Z })
+                    {
+                        var best = ChooseFace(faces, axis);
+                        if (best == null) continue;
+
+                        var view = axis == PlaneAxis.Z ? skeleton.Elevation : skeleton.Plan;
+                        if (view == null) continue;
+
+                        try
+                        {
+                            document.FamilyCreate.NewAlignment(view, best.Plane.GetReference(), best.Face.Reference);
+                            locked += 1;
+                        }
+                        catch (Exception ex)
+                        {
+                            // One stubborn face must not cost the whole family its constraints.
+                            if (failures.Messages.Count < 3) warnings.Add($"Lock \"{form.Name}\": {ex.Message}");
+                        }
+                    }
+                }
+
+                var status = transaction.Commit();
+                if (status != TransactionStatus.Committed)
+                {
+                    warnings.Add(
+                        $"Geometry locks were rolled back ({status}): {string.Join(" ", failures.Messages.Take(3))}");
+                    return 0;
+                }
+            }
+
+            return locked;
+        }
+
+        private sealed class FaceCandidate
+        {
+            public PlaneAxis Axis;
+            public double Coordinate;
+            public Face Face;
+            public ReferencePlane Plane;
+        }
+
+        private static void CollectFaces(
+            Element form,
+            Options options,
+            PlaneSkeleton skeleton,
+            List<FaceCandidate> faces)
+        {
+            GeometryElement geometry;
+            try
+            {
+                geometry = form.get_Geometry(options);
+            }
+            catch
+            {
+                return;
+            }
+
+            if (geometry == null) return;
+
+            foreach (var geometryObject in geometry)
+            {
+                var solid = geometryObject as Solid;
+                if (solid == null) continue;
+
+                foreach (Face face in solid.Faces)
+                {
+                    var planar = face as PlanarFace;
+                    if (planar == null || face.Reference == null) continue;
+
+                    var normal = planar.FaceNormal;
+                    PlaneAxis axis;
+                    double coordinate;
+
+                    if (Math.Abs(normal.X) > 0.999)
+                    {
+                        axis = PlaneAxis.X;
+                        coordinate = planar.Origin.X;
+                    }
+                    else if (Math.Abs(normal.Y) > 0.999)
+                    {
+                        axis = PlaneAxis.Y;
+                        coordinate = planar.Origin.Y;
+                    }
+                    else if (Math.Abs(normal.Z) > 0.999)
+                    {
+                        axis = PlaneAxis.Z;
+                        coordinate = planar.Origin.Z;
+                    }
+                    else
+                    {
+                        continue;
+                    }
+
+                    if (!skeleton.Drives(axis, coordinate)) continue;
+
+                    var plane = skeleton.Find(axis, coordinate);
+                    if (plane == null) continue;
+
+                    faces.Add(new FaceCandidate
+                    {
+                        Axis = axis,
+                        Coordinate = coordinate,
+                        Face = face,
+                        Plane = plane,
+                    });
+                }
+            }
+        }
+
+        private static FaceCandidate ChooseFace(List<FaceCandidate> faces, PlaneAxis axis)
+        {
+            var onAxis = faces.Where(candidate => candidate.Axis == axis).ToList();
+            if (onAxis.Count == 0) return null;
+            if (onAxis.Count == 1) return onAxis[0];
+
+            // The face furthest from the datum wins: that is the one an overall dimension
+            // measures, and the one that cannot collapse the form onto itself.
+            return onAxis.OrderByDescending(candidate => Math.Abs(candidate.Coordinate)).First();
+        }
+
+        /// <summary>
+        /// Build-time proof that the constraints work: drags a labelled reference plane and
+        /// reports whether the geometry followed, then puts it back. The bridge cannot use
+        /// FamilyManager.Set, but moving the plane is the same edit the user makes in Revit.
+        /// Runs only with FAMILY_AGENT_PROBE=1.
+        /// </summary>
+        private static string SelfCheck(Document document, PlaneSkeleton skeleton, CoreParameterSet parameters)
+        {
+            var report = new StringBuilder();
+            var before = ModelSignature(document);
+            var tried = 0;
+
+            foreach (var parameter in parameters.Ordered)
+            {
+                if (tried >= 6) break;
+                if (!IsType(parameter.Type, "Length")) continue;
+                if (!string.IsNullOrWhiteSpace(parameter.Formula)) continue;
+                if (!parameter.Number.HasValue) continue;
+
+                var millimetres = Math.Abs(parameter.Number.Value);
+                if (millimetres < 1) continue;
+
+                var target = Ft(millimetres);
+                var candidate = skeleton.Planes.FirstOrDefault(entry =>
+                    entry.Drives &&
+                    Math.Abs(Math.Abs(entry.Coordinate) - target) < 1.0 / MmPerFoot);
+
+                if (candidate == null) continue;
+                tried += 1;
+
+                var delta = new XYZ(
+                    candidate.Axis == PlaneAxis.X ? 50.0 / MmPerFoot : 0,
+                    candidate.Axis == PlaneAxis.Y ? 50.0 / MmPerFoot : 0,
+                    candidate.Axis == PlaneAxis.Z ? 50.0 / MmPerFoot : 0);
+
+                var label = parameter.Name + ": ";
+
+                try
+                {
+                    using (var transaction = SilentTransaction(document, "self-check", new FailureCollector()))
+                    {
+                        transaction.Start();
+                        ElementTransformUtils.MoveElement(document, candidate.Plane.Id, delta);
+                        document.Regenerate();
+
+                        report.Append(label)
+                            .Append(Math.Abs(before - ModelSignature(document)) > 1e-9 ? "MOVE; " : "still; ");
+
+                        // Roll back: the probe only measures, the saved family keeps its values.
+                        var status = transaction.RollBack();
+                        if (status != TransactionStatus.RolledBack)
+                        {
+                            report.Append("rollback=").Append(status).Append("; ");
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    report.Append(label).Append("X ").Append(ex.Message).Append("; ");
+                }
+            }
+
+            return report.ToString();
+        }
+
+        private static double ModelSignature(Document document)
+        {
+            var signature = 0.0;
+            var options = new Options { ComputeReferences = false, DetailLevel = ViewDetailLevel.Fine };
+
+            foreach (var extrusion in new FilteredElementCollector(document)
+                         .OfClass(typeof(Extrusion))
+                         .Cast<Extrusion>())
+            {
+                var geometry = extrusion.get_Geometry(options);
+                if (geometry == null) continue;
+
+                foreach (var geometryObject in geometry)
+                {
+                    var solid = geometryObject as Solid;
+                    if (solid == null) continue;
+
+                    var box = solid.GetBoundingBox();
+                    if (box == null) continue;
+
+                    var dx = box.Max.X - box.Min.X;
+                    var dy = box.Max.Y - box.Min.Y;
+                    var dz = box.Max.Z - box.Min.Z;
+
+                    // Volume catches stretch, the corner sum catches a pure move.
+                    signature += dx * dy * dz;
+                    signature += 0.0001 * (box.Min.X + box.Min.Y + box.Min.Z + box.Max.X + box.Max.Y + box.Max.Z);
+                }
+            }
+
+            return signature;
+        }
+
+        private sealed class PlaneDimension
+        {
+            private readonly View _view;
+            private readonly ReferencePlane _from;
+            private readonly ReferencePlane _to;
+            private readonly XYZ _start;
+            private readonly XYZ _end;
+            private readonly Autodesk.Revit.DB.FamilyParameter _label;
+
+            public PlaneDimension(
+                View view,
+                ReferencePlane from,
+                ReferencePlane to,
+                XYZ start,
+                XYZ end,
+                Autodesk.Revit.DB.FamilyParameter label)
+            {
+                _view = view;
+                _from = from;
+                _to = to;
+                _start = start;
+                _end = end;
+                _label = label;
+            }
+
+            public string Name => $"{_from.Name} → {_to.Name}";
+
+            public bool Create(Document document, List<string> warnings)
+            {
+                return AddDimension(document, _view, _from, _to, _start, _end, _label, warnings);
+            }
+        }
+
+        private static PlaneAxis AxisFor(string name)
+        {
+            var text = (name ?? string.Empty).ToLowerInvariant();
+
+            if (text.Contains("width") || text.Contains("left") || text.Contains("right")) return PlaneAxis.X;
+            if (text.Contains("depth") || text.Contains("front") || text.Contains("back")) return PlaneAxis.Y;
+            return PlaneAxis.Z;
+        }
+
+        private static View FindView(Document document, ViewType type)
+        {
+            return new FilteredElementCollector(document)
+                .OfClass(typeof(View))
+                .Cast<View>()
+                .FirstOrDefault(view => !view.IsTemplate && view.ViewType == type);
+        }
+
+        private static ReferencePlane FindPlane(Document document, string name)
+        {
+            return new FilteredElementCollector(document)
+                .OfClass(typeof(ReferencePlane))
+                .Cast<ReferencePlane>()
+                .FirstOrDefault(plane => string.Equals(plane.Name, name, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static ReferencePlane AddPlane(
+            Document document,
+            View view,
+            string name,
+            PlaneAxis axis,
+            double offset,
+            double halfLength)
+        {
+            XYZ origin;
+            XYZ along;
+            XYZ across;
+
+            switch (axis)
+            {
+                case PlaneAxis.X:
+                    origin = new XYZ(offset, 0, 0);
+                    along = XYZ.BasisY;
+                    across = XYZ.BasisZ;
+                    break;
+                case PlaneAxis.Y:
+                    origin = new XYZ(0, offset, 0);
+                    along = XYZ.BasisX;
+                    across = XYZ.BasisZ;
+                    break;
+                default:
+                    origin = new XYZ(0, 0, offset);
+                    along = XYZ.BasisX;
+                    across = XYZ.BasisY;
+                    break;
+            }
+
+            // NewReferencePlane takes absolute points, not directions: the plane runs through
+            // the bubble/free ends and a third point offset inside the same plane. Passing a
+            // unit vector as the cut direction skewed the plane and made every dimension on
+            // it unsatisfiable.
+            var bubbleEnd = origin - along * halfLength;
+            var freeEnd = origin + along * halfLength;
+            var thirdPoint = freeEnd + across * halfLength;
+
+            var plane = document.FamilyCreate.NewReferencePlane2(bubbleEnd, freeEnd, thirdPoint, view);
+            if (plane == null) return null;
+
+            try { plane.Name = name; }
+            catch { /* keep the generated name */ }
+
+            return plane;
+        }
+
+        private static bool AddDimension(
+            Document document,
+            View view,
+            ReferencePlane from,
+            ReferencePlane to,
+            XYZ start,
+            XYZ end,
+            Autodesk.Revit.DB.FamilyParameter label,
+            List<string> warnings)
+        {
+            if (view == null) return false;
+
+            try
+            {
+                if (start.DistanceTo(end) < 1.0 / 304.8) return false;
+
+                var references = new ReferenceArray();
+                references.Append(from.GetReference());
+                references.Append(to.GetReference());
+
+                var dimension = document.FamilyCreate.NewDimension(view, Line.CreateBound(start, end), references);
+                if (dimension == null) return false;
+
+                if (label != null)
+                {
+                    dimension.FamilyLabel = label;
+
+                    // Revit silently refuses some dimensions: make that visible instead of
+                    // shipping a family whose parameters drive nothing.
+                    if (dimension.FamilyLabel == null)
+                    {
+                        warnings.Add($"Dimension \"{from.Name}\" → \"{to.Name}\" could not be labelled");
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                warnings.Add($"Dimension \"{from.Name}\" → \"{to.Name}\": {ex.Message}");
+                return false;
+            }
+        }
+
+        private static HashSet<ElementId> LabelledParameters(Document document)
+        {
+            var labelled = new HashSet<ElementId>();
+
+            foreach (var dimension in new FilteredElementCollector(document)
+                         .OfClass(typeof(Dimension))
+                         .Cast<Dimension>())
+            {
+                try
+                {
+                    var label = dimension.FamilyLabel;
+                    if (label != null) labelled.Add(label.Id);
+                }
+                catch
+                {
+                    // Some template dimensions (radial, angular, multi-segment) cannot carry a
+                    // label and throw when asked for one.
+                }
+            }
+
+            return labelled;
+        }
+
         // -------------------------------------------------------------- geometry
 
-        private static int CreateGeometry(
+        private static List<Element> CreateGeometry(
             Document document,
             ResolvedModel model,
             IDictionary<string, MaterialDef> materials,
             List<string> warnings)
         {
-            var created = 0;
+            var forms = new List<Element>();
 
             foreach (var part in model.Parts)
             {
                 try
                 {
-                    var body = BuildSolid(part.Solid);
-                    if (body == null)
-                    {
-                        warnings.Add($"Part \"{part.Id}\" produced no solid");
-                        continue;
-                    }
-
-                    foreach (var cut in part.Cuts)
-                    {
-                        try
-                        {
-                            var cutter = BuildSolid(cut);
-                            if (cutter == null) continue;
-                            body = BooleanOperationsUtils.ExecuteBooleanOperation(
-                                body, cutter, BooleanOperationsType.Difference);
-                        }
-                        catch (Exception ex)
-                        {
-                            warnings.Add($"Cut on \"{part.Id}\" failed: {ex.Message}");
-                        }
-                    }
-
-                    if (body == null || body.Volume <= 0)
-                    {
-                        warnings.Add($"Part \"{part.Id}\" has no volume after boolean cuts");
-                        continue;
-                    }
-
                     for (var index = 0; index < Math.Max(1, part.ArrayCount); index += 1)
                     {
-                        var clone = index == 0
-                            ? body
-                            : SolidUtils.CreateTransformed(body, Transform.CreateTranslation(ArrayOffset(part, index)));
+                        var offset = ArrayOffsetMm(part, index);
+                        var body = CreateForm(document, part.Solid, offset, true);
 
-                        var element = FreeFormElement.Create(document, clone);
-                        if (element == null) continue;
+                        if (body == null)
+                        {
+                            warnings.Add($"Part \"{part.Id}\" produced no solid");
+                            continue;
+                        }
 
                         try
                         {
-                            element.Name = part.ArrayCount > 1 ? $"{part.Name} {index + 1}" : part.Name;
+                            body.Name = part.ArrayCount > 1 ? $"{part.Name} {index + 1}" : part.Name;
                         }
                         catch
                         {
-                            // Free form elements do not always accept a name.
+                            // Forms do not always accept a name.
                         }
 
-                        var materialName = MaterialName(part, materials);
-                        var color = MaterialColor(part, materials);
-                        AssignMaterial(document, element, materialName, color, warnings);
-                        created += 1;
+                        AssignMaterial(
+                            document,
+                            body,
+                            MaterialName(part, materials),
+                            MaterialColor(part, materials),
+                            warnings);
+                        forms.Add(body);
+
+                        if (part.Solid.Kind == "cylinder" && part.Solid.InnerRadius > 0)
+                        {
+                            try
+                            {
+                                var bore = CreateCylinderForm(
+                                    document, part.Solid, offset, part.Solid.InnerRadius, false, true);
+                                if (bore != null) forms.Add(bore);
+                            }
+                            catch (Exception ex)
+                            {
+                                warnings.Add($"Bore on \"{part.Id}\" failed: {ex.Message}");
+                            }
+                        }
+
+                        foreach (var cut in part.Cuts)
+                        {
+                            try
+                            {
+                                var cutter = CreateForm(document, cut, offset, false);
+                                if (cutter != null) forms.Add(cutter);
+                            }
+                            catch (Exception ex)
+                            {
+                                warnings.Add($"Cut on \"{part.Id}\" failed: {ex.Message}");
+                            }
+                        }
                     }
                 }
                 catch (Exception ex)
@@ -374,32 +1475,76 @@ namespace FamilyAgent.Addin
                 }
             }
 
-            return created;
+            return forms;
         }
 
-        private static XYZ ArrayOffset(ResolvedPart part, int index)
+        private static Vec3d ArrayOffsetMm(ResolvedPart part, int index)
         {
-            var distance = Ft(part.ArraySpacing * index);
+            var distance = part.ArraySpacing * index;
             switch (part.ArrayAxis)
             {
-                case "y": return new XYZ(0, distance, 0);
-                case "z": return new XYZ(0, 0, distance);
-                default: return new XYZ(distance, 0, 0);
+                case "y": return new Vec3d(0, distance, 0);
+                case "z": return new Vec3d(0, 0, distance);
+                default: return new Vec3d(distance, 0, 0);
             }
         }
 
-        private static Solid BuildSolid(ResolvedSolid solid)
+        private static Extrusion CreateForm(Document document, ResolvedSolid solid, Vec3d offset, bool isSolid)
         {
             switch (solid.Kind)
             {
-                case "box": return BuildBox(solid);
-                case "cylinder": return BuildCylinder(solid);
-                case "prism": return BuildPrism(solid);
+                case "box": return CreateBoxForm(document, solid, offset, isSolid);
+                case "cylinder": return CreateCylinderForm(document, solid, offset, solid.Radius, isSolid, false);
+                case "prism": return CreatePrismForm(document, solid, offset, isSolid);
                 default: return null;
             }
         }
 
-        private static Solid BuildBox(ResolvedSolid solid)
+        /// <summary>
+        /// Native family forms are the requirement: extrusions (and void extrusions for cuts)
+        /// stay editable in Revit and can be constrained to reference planes, unlike the free
+        /// form elements the builder used before.
+        /// </summary>
+        private static Extrusion Extrude(
+            Document document,
+            Plane plane,
+            IList<XYZ> points,
+            double length,
+            bool isSolid)
+        {
+            if (!(Math.Abs(length) > 1e-9)) throw new InvalidOperationException("extrusion has a zero depth");
+
+            var sketchPlane = SketchPlane.Create(document, plane);
+
+            var curveArray = new CurveArray();
+            foreach (var curve in Loop(points)) curveArray.Append(curve);
+
+            var profile = new CurveArrArray();
+            profile.Append(curveArray);
+
+            return document.FamilyCreate.NewExtrusion(isSolid, profile, sketchPlane, length);
+        }
+
+        private static Plane PlaneAt(XYZ origin, XYZ normal)
+        {
+            var w = normal.Normalize();
+            var helper = Math.Abs(w.Z) < 0.9 ? XYZ.BasisZ : XYZ.BasisX;
+            var u = w.CrossProduct(helper).Normalize();
+            var v = w.CrossProduct(u).Normalize();
+            return Plane.CreateByOriginAndBasis(origin, u, v);
+        }
+
+        private static XYZ AxisUnit(string axis)
+        {
+            switch (axis)
+            {
+                case "x": return XYZ.BasisX;
+                case "y": return XYZ.BasisY;
+                default: return XYZ.BasisZ;
+            }
+        }
+
+        private static Extrusion CreateBoxForm(Document document, ResolvedSolid solid, Vec3d offset, bool isSolid)
         {
             var width = Ft(Math.Abs(solid.Size.X));
             var depth = Ft(Math.Abs(solid.Size.Y));
@@ -408,141 +1553,124 @@ namespace FamilyAgent.Addin
             if (width <= 0 || depth <= 0 || height <= 0)
                 throw new InvalidOperationException("box has a zero dimension");
 
-            var profile = RectLoop(XYZ.Zero, width, depth);
-            Solid result = GeometryCreationUtilities.CreateExtrusionGeometry(
-                new List<CurveLoop> { profile }, XYZ.BasisZ, height);
+            var angle = solid.RotationZ * DegToRad;
+            var u = new XYZ(Math.Cos(angle), Math.Sin(angle), 0);
+            var v = new XYZ(-Math.Sin(angle), Math.Cos(angle), 0);
 
-            if (Math.Abs(solid.RotationZ) > 1e-9)
+            var zBase = Math.Min(solid.Origin.Z, solid.Origin.Z + solid.Size.Z) + offset.Z;
+            var center = new XYZ(
+                Ft(solid.Origin.X + offset.X),
+                Ft(solid.Origin.Y + offset.Y),
+                Ft(zBase));
+
+            var halfWidth = width / 2;
+            var halfDepth = depth / 2;
+
+            var points = new List<XYZ>
             {
-                result = SolidUtils.CreateTransformed(
-                    result, Transform.CreateRotation(XYZ.BasisZ, solid.RotationZ * DegToRad));
-            }
+                center - u * halfWidth - v * halfDepth,
+                center + u * halfWidth - v * halfDepth,
+                center + u * halfWidth + v * halfDepth,
+                center - u * halfWidth + v * halfDepth,
+            };
 
-            var z = solid.Size.Z >= 0 ? solid.Origin.Z : solid.Origin.Z + solid.Size.Z;
-            return SolidUtils.CreateTransformed(
-                result, Transform.CreateTranslation(new XYZ(Ft(solid.Origin.X), Ft(solid.Origin.Y), Ft(z))));
+            return Extrude(document, Plane.CreateByOriginAndBasis(center, u, v), points, height, isSolid);
         }
 
-        private static Solid BuildCylinder(ResolvedSolid solid)
+        private static Extrusion CreateCylinderForm(
+            Document document,
+            ResolvedSolid solid,
+            Vec3d offset,
+            double radiusMm,
+            bool isSolid,
+            bool asBore)
         {
-            var radius = Ft(solid.Radius);
+            var radius = Ft(radiusMm);
             var length = Ft(Math.Abs(solid.Height));
+
             if (radius <= 0 || length <= 0) throw new InvalidOperationException("cylinder has a zero dimension");
 
-            XYZ normal, u, v;
-            Basis(solid.Axis, out normal, out u, out v);
+            var direction = AxisUnit(solid.Axis) * (solid.Height >= 0 ? 1 : -1);
+            var basePoint = new XYZ(
+                Ft(solid.Base.X + offset.X),
+                Ft(solid.Base.Y + offset.Y),
+                Ft(solid.Base.Z + offset.Z));
 
-            var direction = solid.Height >= 0 ? normal : -normal;
-            var center = ToXyz(solid.Base);
+            // A bore has to overshoot both ends to cut the tube cleanly.
+            var start = asBore ? basePoint - direction * Ft(0.6) : basePoint;
+            var end = asBore ? length + Ft(1.2) : length;
 
-            var profile = CircleLoop(center, radius, u, v, solid.Segments);
-            Solid result = GeometryCreationUtilities.CreateExtrusionGeometry(
-                new List<CurveLoop> { profile }, direction, length);
+            var plane = PlaneAt(start, direction);
+            var segments = Math.Max(12, solid.Segments);
+            var points = new List<XYZ>(segments);
 
-            if (solid.InnerRadius > 0)
+            for (var i = 0; i < segments; i += 1)
             {
-                var innerCenter = center - direction * Ft(0.6);
-                var innerProfile = CircleLoop(innerCenter, Ft(solid.InnerRadius), u, v, solid.Segments);
-                var inner = GeometryCreationUtilities.CreateExtrusionGeometry(
-                    new List<CurveLoop> { innerProfile }, direction, length + Ft(1.2));
-                result = BooleanOperationsUtils.ExecuteBooleanOperation(
-                    result, inner, BooleanOperationsType.Difference);
+                var angle = 2 * Math.PI * i / segments;
+                points.Add(start + plane.XVec * (Math.Cos(angle) * radius) + plane.YVec * (Math.Sin(angle) * radius));
             }
 
-            return result;
+            return Extrude(document, plane, points, end, isSolid);
         }
 
-        private static Solid BuildPrism(ResolvedSolid solid)
+        private static Extrusion CreatePrismForm(Document document, ResolvedSolid solid, Vec3d offset, bool isSolid)
         {
             var length = Ft(Math.Abs(solid.To - solid.From));
             if (length <= 0) throw new InvalidOperationException("prism has a zero depth");
 
-            XYZ u, v, start;
-            XYZ direction;
+            XYZ u, v, axisUnit;
+            XYZ origin;
+            var baseCoordinate = Math.Min(solid.From, solid.To);
 
             switch (solid.Plane)
             {
                 case "xz":
                     u = XYZ.BasisX;
                     v = XYZ.BasisZ;
-                    start = new XYZ(0, Ft(solid.From), 0);
-                    direction = XYZ.BasisY;
+                    axisUnit = XYZ.BasisY;
+                    origin = new XYZ(0, Ft(baseCoordinate + offset.Y), 0);
                     break;
                 case "yz":
                     u = XYZ.BasisY;
                     v = XYZ.BasisZ;
-                    start = new XYZ(Ft(solid.From), 0, 0);
-                    direction = XYZ.BasisX;
+                    axisUnit = XYZ.BasisX;
+                    origin = new XYZ(Ft(baseCoordinate + offset.X), 0, 0);
                     break;
                 default:
                     u = XYZ.BasisX;
                     v = XYZ.BasisY;
-                    start = new XYZ(0, 0, Ft(solid.From));
-                    direction = XYZ.BasisZ;
+                    axisUnit = XYZ.BasisZ;
+                    origin = new XYZ(0, 0, Ft(baseCoordinate + offset.Z));
                     break;
             }
-
-            if (solid.To < solid.From) direction = -direction;
 
             var points = new List<XYZ>();
             foreach (var point in solid.Points)
             {
-                points.Add(start + u * Ft(point.A) + v * Ft(point.B));
+                var a = Ft(point.A);
+                var b = Ft(point.B);
+
+                switch (solid.Plane)
+                {
+                    case "xz":
+                        points.Add(origin + u * (a + Ft(offset.X)) + v * (b + Ft(offset.Z)));
+                        break;
+                    case "yz":
+                        points.Add(origin + u * (a + Ft(offset.Y)) + v * (b + Ft(offset.Z)));
+                        break;
+                    default:
+                        points.Add(origin + u * (a + Ft(offset.X)) + v * (b + Ft(offset.Y)));
+                        break;
+                }
             }
 
             if (points.Count < 3) throw new InvalidOperationException("prism needs at least 3 points");
 
-            var loop = Loop(points);
-            return GeometryCreationUtilities.CreateExtrusionGeometry(
-                new List<CurveLoop> { loop }, direction, length);
-        }
+            var normal = u.CrossProduct(v);
+            var desired = axisUnit * Math.Sign(solid.To - solid.From);
+            var end = desired.DotProduct(normal) > 0 ? length : -length;
 
-        private static void Basis(string axis, out XYZ normal, out XYZ u, out XYZ v)
-        {
-            switch (axis)
-            {
-                case "x":
-                    normal = XYZ.BasisX;
-                    u = XYZ.BasisY;
-                    v = XYZ.BasisZ;
-                    return;
-                case "y":
-                    normal = XYZ.BasisY;
-                    u = XYZ.BasisZ;
-                    v = XYZ.BasisX;
-                    return;
-                default:
-                    normal = XYZ.BasisZ;
-                    u = XYZ.BasisX;
-                    v = XYZ.BasisY;
-                    return;
-            }
-        }
-
-        private static CurveLoop RectLoop(XYZ center, double width, double depth)
-        {
-            var halfWidth = width / 2;
-            var halfDepth = depth / 2;
-
-            return Loop(new List<XYZ>
-            {
-                new XYZ(center.X - halfWidth, center.Y - halfDepth, center.Z),
-                new XYZ(center.X + halfWidth, center.Y - halfDepth, center.Z),
-                new XYZ(center.X + halfWidth, center.Y + halfDepth, center.Z),
-                new XYZ(center.X - halfWidth, center.Y + halfDepth, center.Z),
-            });
-        }
-
-        private static CurveLoop CircleLoop(XYZ center, double radius, XYZ u, XYZ v, int segments)
-        {
-            var count = Math.Max(12, segments);
-            var points = new List<XYZ>(count);
-            for (var i = 0; i < count; i += 1)
-            {
-                var angle = 2 * Math.PI * i / count;
-                points.Add(center + u * (Math.Cos(angle) * radius) + v * (Math.Sin(angle) * radius));
-            }
-            return Loop(points);
+            return Extrude(document, Plane.CreateByOriginAndBasis(origin, u, v), points, end, isSolid);
         }
 
         private static CurveLoop Loop(IList<XYZ> points)

@@ -75,6 +75,21 @@ Check the model*, bước đang chạy được tô đậm kèm hoạt động t
 `Reading the document`, `Writing the spec`) và đồng hồ `mm:ss`. Nút **Stop** (ô vuông đỏ)
 huỷ giữa chừng và tắt luôn tiến trình `cmdc` phía sau.
 
+### Chọn mức chi tiết LOD
+
+Trên thanh trên cùng có nút **LOD 200 / 300 / 350 / 400** (mặc định 300, lưu lại cho lần mở sau):
+
+| LOD | Dùng cho | Quy mô |
+| --- | --- | --- |
+| 200 | khối bao, phối cảnh, định tuyến sơ bộ | 3–8 parts, 4–10 tham số |
+| 300 | thiết kế thực tế + cổng kết nối MEP, bóc khối lượng | 4–16 parts, 6–24 tham số |
+| 350 | phối hợp MEP / kiểm tra va chạm: bích, tai treo, giá đỡ, clearance | 10–30 parts, 10–26 tham số |
+| 400 | chi tiết chế tạo/lắp ráp: bích, gioăng, bulông, lỗ khoan | 18–45 parts, 16–40 tham số |
+
+Mức LOD được gửi kèm mỗi yêu cầu, ghi vào spec (`lod`) và vào `notes`, đồng thời đặt
+`Detail Level` của view 3D trong Revit tương ứng Coarse / Medium / Fine. Đổi LOD rồi gửi
+một yêu cầu chỉnh sửa là mô hình được dựng lại ở mức chi tiết mới.
+
 ### Dựng theo datasheet PDF
 
 Bấm **biểu tượng kẹp giấy** cạnh ô chat để đính kèm `pdf`, ảnh chụp bản vẽ, `docx`, `xlsx`,

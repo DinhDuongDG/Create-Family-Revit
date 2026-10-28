@@ -5,6 +5,7 @@ export interface DesignStats {
   parts: number;
   instances: number;
   materials: number;
+  lod?: number;
   bounds: { x: number; y: number; z: number } | null;
   attempts: number;
   elapsedMs: number;
@@ -65,6 +66,23 @@ export async function fetchHealth(): Promise<Health | null> {
   }
 }
 
+export interface ServerPing {
+  ok: boolean;
+  agent: AgentStatus;
+  time: number;
+}
+
+/** Lightweight liveness probe; safe to poll while a design run is in flight. */
+export async function pingServer(): Promise<ServerPing | null> {
+  try {
+    const response = await fetch("/api/ping");
+    if (!response.ok) return null;
+    return (await response.json()) as ServerPing;
+  } catch {
+    return null;
+  }
+}
+
 export interface UploadedDocument {
   name: string;
   size: number;
@@ -92,10 +110,19 @@ export async function uploadDocument(file: File): Promise<UploadedDocument> {
   return payload as UploadedDocument;
 }
 
+export type Lod = 200 | 300 | 350 | 400;
+
 export async function streamDesign(
-  payload: { prompt: string; spec: FamilySpec | null; model?: string; attachments?: { path: string; name: string }[] },
+  payload: {
+    prompt: string;
+    spec: FamilySpec | null;
+    lod?: Lod;
+    model?: string;
+    attachments?: { path: string; name: string }[];
+  },
   onEvent: (event: DesignEvent) => void,
   signal?: AbortSignal,
+  onHeartbeat?: () => void,
 ): Promise<void> {
   const response = await fetch("/api/design", {
     method: "POST",
@@ -123,6 +150,10 @@ export async function streamDesign(
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
+
+    // Any byte from the server — including the ": ping" keep-alive — proves it is alive.
+    onHeartbeat?.();
+
     buffer += decoder.decode(value, { stream: true });
 
     let boundary = buffer.indexOf("\n\n");
@@ -144,6 +175,19 @@ export async function streamDesign(
   }
 }
 
+export interface BuildStats {
+  parts?: number;
+  instances?: number;
+  forms?: number;
+  voids?: number;
+  refPlanes?: number;
+  refDimensions?: number;
+  locks?: number;
+  lod?: number | null;
+  driving?: string[];
+  unlabelled?: string[];
+}
+
 export interface BuildResult {
   ok: boolean;
   mode?: "revit" | "queue";
@@ -156,6 +200,7 @@ export interface BuildResult {
   elapsedMs?: number;
   busy?: boolean;
   issues?: Issue[];
+  stats?: BuildStats;
 }
 
 export async function buildFamily(spec: FamilySpec): Promise<BuildResult> {

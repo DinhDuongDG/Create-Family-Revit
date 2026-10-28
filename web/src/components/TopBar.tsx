@@ -1,5 +1,12 @@
 import { useState, useRef, useEffect } from "react";
 import type { Units } from "../lib/format";
+import type { Lod } from "../lib/api";
+
+export interface AgentPill {
+  tone: "ok" | "warn" | "error";
+  text: string;
+  hint?: string;
+}
 
 interface Props {
   name: string;
@@ -9,10 +16,13 @@ interface Props {
   native: boolean;
   running?: boolean;
   agentStage?: string | null;
+  agentStatus?: AgentPill;
   units: Units;
   onUnits: (units: Units) => void;
   revitVersion: string;
   onRevitVersion: (version: string) => void;
+  lod: Lod;
+  onLod: (lod: Lod) => void;
   onBuild: () => void;
   canBuild: boolean;
   building: boolean;
@@ -21,6 +31,13 @@ interface Props {
   onNewModel?: () => void;
   onLoadDemo?: (key: "fcu" | "pump" | "elbow") => void;
 }
+
+const LOD_OPTIONS: { value: Lod; label: string; hint: string }[] = [
+  { value: 200, label: "200", hint: "LOD 200 · khối bao, 3-8 parts" },
+  { value: 300, label: "300", hint: "LOD 300 · thiết kế thực tế, 4-16 parts" },
+  { value: 350, label: "350", hint: "LOD 350 · phối hợp MEP, tai treo, 10-30 parts" },
+  { value: 400, label: "400", hint: "LOD 400 · chi tiết chế tạo, 18-45 parts" },
+];
 
 const AGENT_STEPS = ["Read brief", "Design family", "Check model"];
 
@@ -48,10 +65,13 @@ export function TopBar({
   native,
   running,
   agentStage,
+  agentStatus,
   units,
   onUnits,
   revitVersion,
   onRevitVersion,
+  lod,
+  onLod,
   onBuild,
   canBuild,
   building,
@@ -118,6 +138,16 @@ export function TopBar({
       </div>
 
       <div className="top-actions">
+        {agentStatus && (
+          <span
+            className={`agent-pill ${agentStatus.tone} ${agentStatus.tone === "ok" ? "agent-pill-pulse" : ""}`}
+            title={agentStatus.hint ?? agentStatus.text}
+          >
+            <span className="agent-pill-dot" />
+            <span className="agent-pill-text">{agentStatus.text}</span>
+          </span>
+        )}
+
         {onLoadDemo && (
           <div className="demo-dropdown-container" ref={dropdownRef}>
             <button
@@ -211,6 +241,20 @@ export function TopBar({
             ft-in
           </button>
         </div>
+
+        <select
+          className="select lod-select"
+          value={lod}
+          onChange={(event) => onLod(Number(event.target.value) as Lod)}
+          aria-label="Level of detail (LOD)"
+          title={LOD_OPTIONS.find((option) => option.value === lod)?.hint ?? "Level of detail"}
+        >
+          {LOD_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value} title={option.hint}>
+              LOD {option.label}
+            </option>
+          ))}
+        </select>
 
         <select
           className="select"

@@ -132,6 +132,7 @@ namespace FamilyAgent.Core
         public string Template { get; set; }
         public string Units { get; set; }
         public string RevitVersion { get; set; }
+        public int? Lod { get; set; }
         public string Description { get; set; }
         public List<FamilyParameter> Parameters { get; set; } = new List<FamilyParameter>();
         public List<FamilyPart> Parts { get; set; } = new List<FamilyPart>();

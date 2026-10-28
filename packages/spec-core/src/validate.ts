@@ -401,6 +401,7 @@ export function validateSpec(raw: unknown): ValidationResult {
     template: text(root.template) || undefined,
     units: "mm",
     revitVersion: text(root.revitVersion) || undefined,
+    lod: [200, 300, 350, 400].includes(Number(root.lod)) ? (Number(root.lod) as 200 | 300 | 350 | 400) : undefined,
     description: text(root.description) || undefined,
     parameters,
     parts,

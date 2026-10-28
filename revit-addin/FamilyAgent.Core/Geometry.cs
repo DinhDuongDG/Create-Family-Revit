@@ -170,7 +170,7 @@ namespace FamilyAgent.Core
 
             foreach (var part in model.Parts)
             {
-                var single = SolidBounds(part.Solid);
+                var single = BoundsOf(part.Solid);
                 for (var i = 0; i < part.ArrayCount; i += 1)
                 {
                     var offset = AxisOffset(part.ArrayAxis, part.ArraySpacing * i);
@@ -190,7 +190,7 @@ namespace FamilyAgent.Core
             return new Vec3d(0, 0, distance);
         }
 
-        private static Bounds3 SolidBounds(ResolvedSolid solid)
+        public static Bounds3 BoundsOf(ResolvedSolid solid)
         {
             var bounds = new Bounds3();
 

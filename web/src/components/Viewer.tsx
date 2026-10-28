@@ -125,13 +125,6 @@ export function Viewer({
   const statusRef = useRef(status);
   statusRef.current = status;
 
-  // Khi Agent bắt đầu làm việc hoặc khi status xuất hiện -> tự động kích hoạt Turntable
-  useEffect(() => {
-    if (status) {
-      setTurntableActive(true);
-    }
-  }, [status]);
-
   useEffect(() => {
     if (!model || model.parts.length === 0) {
       setVisiblePartCount(0);
@@ -162,20 +155,24 @@ export function Viewer({
     prevModelRef.current = model;
 
     if (isDifferent) {
-      // Khi nạp 1 model mới hoàn chỉnh vào
+      // A finished model arrives in one go: build it up part by part instead of popping
+      // the whole thing in, so the user sees it assemble. Big families step faster.
       setVisiblePartCount(1);
       setAnimatingPartName(model.parts[0]?.name || null);
-      let count = 1;
+
       const total = model.parts.length;
+      const step = total > 40 ? 90 : total > 16 ? 150 : 320;
+      let count = 1;
+
       const interval = setInterval(() => {
         count += 1;
         setVisiblePartCount(count);
         setAnimatingPartName(model.parts[count - 1]?.name || null);
         if (count >= total) {
           clearInterval(interval);
-          setTimeout(() => setAnimatingPartName(null), 1200);
+          setTimeout(() => setAnimatingPartName(null), 900);
         }
-      }, 350);
+      }, step);
       return () => clearInterval(interval);
     } else {
       setVisiblePartCount(model.parts.length);
@@ -863,8 +860,8 @@ export function Viewer({
         controls.update();
       }
 
-      // Auto-turntable exhibition rotation when building/generating model or toggled by user button
-      if (statusRef.current || turntableRef.current) {
+      // Turntable exhibition rotation when explicitly toggled by user
+      if (turntableRef.current) {
         controls.autoRotate = true;
         controls.autoRotateSpeed = 0.35; // Gentle, cinematic exhibition turntable speed
       } else {
@@ -1019,7 +1016,9 @@ export function Viewer({
       const isClearance = part.id.toLowerCase().includes("clearance") || part.name.toLowerCase().includes("clearance");
       const isSelected = part.id === selectedPartId;
       const isTransparent = transparentPartIds.includes(part.id) || isClearance;
-      const key = `${color}|${props.metalness}|${props.roughness}|${isTransparent ? (isClearance ? "clearance" : "trans") : "solid"}`;
+      // The part being assembled glows for a moment so the build reads part by part.
+      const isAnimating = Boolean(animatingPartName) && part.name === animatingPartName;
+      const key = `${color}|${props.metalness}|${props.roughness}|${isTransparent ? (isClearance ? "clearance" : "trans") : "solid"}|${isAnimating ? "hot" : "cool"}`;
 
       const activeOpacity = isTransparent ? (isClearance ? 0.22 : 0.35) : 1.0;
 
@@ -1049,6 +1048,8 @@ export function Viewer({
             transparent: isTransparent,
             opacity: activeOpacity,
             depthWrite: !isTransparent,
+            emissive: new THREE.Color(color),
+            emissiveIntensity: isAnimating ? 0.55 : 0,
             polygonOffset: true,
             polygonOffsetFactor: 1,
             polygonOffsetUnits: 1,
@@ -1070,6 +1071,13 @@ export function Viewer({
               transparent: false,
               opacity: 1.0,
             })
+          : isAnimating
+          ? new THREE.LineBasicMaterial({
+              color: 0x2f7d5b, // green edge on the part that just appeared
+              linewidth: 2,
+              transparent: true,
+              opacity: 0.95,
+            })
           : isTransparent
           ? new THREE.LineBasicMaterial({
               color: 0x30373b,
@@ -1077,7 +1085,7 @@ export function Viewer({
               opacity: 0.1,
             })
           : edgeMaterial;
-        if (isSelected || isTransparent) state.disposables.push(thisEdgeMat);
+        if (isSelected || isTransparent || isAnimating) state.disposables.push(thisEdgeMat);
         edges = new THREE.LineSegments(edgeGeometry, thisEdgeMat);
       }
 
@@ -1266,7 +1274,14 @@ export function Viewer({
     }
 
     if (showPlanes && model.bounds) {
-      const planeExtent = Math.max(gridSize * 0.7, 2400);
+      // Keep the plane frame close to the model: a full-grid frame tints the whole viewport.
+      const modelExtent = Math.max(
+        model.bounds.size.x,
+        model.bounds.size.y,
+        model.bounds.size.z,
+        400,
+      );
+      const planeExtent = modelExtent * 1.7;
       const halfExt = planeExtent / 2;
 
       const refLineMat = new THREE.LineDashedMaterial({
@@ -1274,33 +1289,28 @@ export function Viewer({
         dashSize: 45,
         gapSize: 25,
         linewidth: 1.5,
+        transparent: true,
+        opacity: 0.7,
       });
       state.disposables.push(refLineMat);
 
-      const refPlaneMat = new THREE.MeshBasicMaterial({
-        color: 0x5cb85c,
-        transparent: true,
-        opacity: 0.04,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-      });
-      state.disposables.push(refPlaneMat);
-
-      // Center (Front/Back) Plane: Y = 0 (XZ Plane)
+      // Reference planes read as green dashed lines in Revit; fills only wash the view out.
+      // Center (Front/Back) plane: Y = 0, drawn as an outline on the floor.
       const xzGeom = new THREE.PlaneGeometry(planeExtent, planeExtent);
       xzGeom.rotateX(Math.PI / 2);
-      xzGeom.translate(0, 0, halfExt / 2);
-      const xzMesh = new THREE.Mesh(xzGeom, refPlaneMat);
-      state.refPlanesGroup.add(xzMesh);
-      state.disposables.push(xzGeom);
+      const xzOutline = new THREE.LineSegments(new THREE.EdgesGeometry(xzGeom), refLineMat);
+      xzOutline.computeLineDistances();
+      xzOutline.position.set(0, 0, 0);
+      state.refPlanesGroup.add(xzOutline);
+      state.disposables.push(xzGeom, xzOutline.geometry);
 
-      // Center (Left/Right) Plane: X = 0 (YZ Plane)
+      // Center (Left/Right) plane: X = 0.
       const yzGeom = new THREE.PlaneGeometry(planeExtent, planeExtent);
       yzGeom.rotateY(Math.PI / 2);
-      yzGeom.translate(0, 0, halfExt / 2);
-      const yzMesh = new THREE.Mesh(yzGeom, refPlaneMat);
-      state.refPlanesGroup.add(yzMesh);
-      state.disposables.push(yzGeom);
+      const yzOutline = new THREE.LineSegments(new THREE.EdgesGeometry(yzGeom), refLineMat);
+      yzOutline.computeLineDistances();
+      state.refPlanesGroup.add(yzOutline);
+      state.disposables.push(yzGeom, yzOutline.geometry);
 
       // Reference cross lines through Origin
       // X-Axis line (along X)
@@ -1326,6 +1336,92 @@ export function Viewer({
       zLine.computeLineDistances();
       state.refPlanesGroup.add(zLine);
       state.disposables.push(zLineGeom);
+
+      // One plane per length parameter — the same skeleton the Revit add-in builds,
+      // so the studio shows where the family's reference planes will sit.
+      const bounds = model.bounds;
+      const centerX = (bounds.min.x + bounds.max.x) / 2;
+      const centerY = (bounds.min.y + bounds.max.y) / 2;
+      const centerZ = (bounds.min.z + bounds.max.z) / 2;
+      const margin = Math.max(bounds.size.x, bounds.size.y, bounds.size.z, 300) * 0.12;
+      const spanX = Math.max(bounds.size.x + margin * 2, 300);
+      const spanY = Math.max(bounds.size.y + margin * 2, 300);
+      const spanZ = Math.max(bounds.size.z + margin * 2, 300);
+
+      // Very light line work: a dozen overlapping planes would otherwise tint the model.
+      const paramLineMat = new THREE.LineDashedMaterial({
+        color: 0x2e8540,
+        dashSize: 40,
+        gapSize: 30,
+        transparent: true,
+        opacity: 0.55,
+      });
+      state.disposables.push(paramLineMat);
+
+      const axisForParameter = (name: string): "x" | "y" | "z" => {
+        const text = name.toLowerCase();
+        if (text.includes("width") || text.includes("length") || text.includes("left") || text.includes("right")) {
+          return "x";
+        }
+        if (text.includes("depth") || text.includes("front") || text.includes("back")) return "y";
+        return "z";
+      };
+
+      let drawn = 0;
+      for (const parameter of parameters) {
+        if (drawn >= 12) break;
+        if (parameter.type !== "Length") continue;
+        if (parameter.formula) continue;
+        if (typeof parameter.value !== "number" || Math.abs(parameter.value) < 1) continue;
+
+        const value = Math.abs(parameter.value);
+        const axis = axisForParameter(parameter.name);
+        const near = (a: number, b: number) => Math.abs(a - b) <= 1;
+
+        let coordinate: number;
+        let width: number;
+        let height: number;
+        let rotate: (geometry: THREE.PlaneGeometry) => void;
+        let place: (mesh: THREE.Object3D) => void;
+
+        if (axis === "x") {
+          // Envelope dimensions sit on the far face, anything else is placed half-way out.
+          coordinate = near(bounds.max.x, value) || near(bounds.size.x, value)
+            ? bounds.max.x
+            : centerX + value / 2;
+          width = spanY;
+          height = spanZ;
+          rotate = (geometry) => geometry.rotateY(Math.PI / 2);
+          place = (mesh) => mesh.position.set(coordinate, centerY, centerZ);
+        } else if (axis === "y") {
+          coordinate = near(bounds.max.y, value) || near(bounds.size.y, value)
+            ? bounds.max.y
+            : centerY + value / 2;
+          width = spanX;
+          height = spanZ;
+          rotate = (geometry) => geometry.rotateX(Math.PI / 2);
+          place = (mesh) => mesh.position.set(centerX, coordinate, centerZ);
+        } else {
+          coordinate = near(bounds.size.z, value) ? bounds.max.z : bounds.min.z + value;
+          width = spanX;
+          height = spanY;
+          rotate = () => undefined;
+          place = (mesh) => mesh.position.set(centerX, centerY, coordinate);
+        }
+
+        // Outline only: a dozen filled planes would tint the whole model green.
+        const planeGeom = new THREE.PlaneGeometry(width, height);
+        rotate(planeGeom);
+
+        const outlineGeom = new THREE.EdgesGeometry(planeGeom);
+        const outline = new THREE.LineSegments(outlineGeom, paramLineMat);
+        outline.computeLineDistances();
+        place(outline);
+        state.refPlanesGroup.add(outline);
+        state.disposables.push(planeGeom, outlineGeom);
+
+        drawn += 1;
+      }
     }
 
     // -------------------------------------------------------------
@@ -1402,7 +1498,7 @@ export function Viewer({
       fit();
       hasFittedRef.current = true;
     }
-  }, [model, parameters, materials, showGrid, showPlanes, showConnectors, selectedPartId, hiddenPartIds, transparentPartIds, visiblePartCount, fit]);
+  }, [model, parameters, materials, showGrid, showPlanes, showConnectors, selectedPartId, hiddenPartIds, transparentPartIds, visiblePartCount, animatingPartName, fit]);
 
   const dims = formatDimensions(model?.bounds ?? null, units);
 
