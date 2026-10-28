@@ -1,5 +1,7 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { jsonrepair } from "jsonrepair";
-import { config } from "./config.js";
+import { config, ROOT } from "./config.js";
 
 export class LlmError extends Error {
   constructor(message, status) {
@@ -96,6 +98,53 @@ export function llmStatus() {
   };
 }
 
+/**
+ * The spec schema shipped in the repo. Passing it as a response format keeps OpenAI
+ * compatible endpoints close to the shape the add-in expects; the prompt and the
+ * validator still guard the result.
+ */
+let cachedSpecSchema;
+let schemaSupported = true;
+
+export function specResponseSchema() {
+  if (cachedSpecSchema !== undefined) return cachedSpecSchema;
+
+  try {
+    cachedSpecSchema = JSON.parse(
+      readFileSync(path.join(ROOT, "spec", "family-spec.schema.json"), "utf8"),
+    );
+  } catch {
+    cachedSpecSchema = null;
+  }
+
+  return cachedSpecSchema;
+}
+
+function responseFormat() {
+  const schema = specResponseSchema();
+  if (schemaSupported && schema) {
+    return { type: "json_schema", json_schema: { name: "family_spec", strict: false, schema } };
+  }
+
+  return { type: "json_object" };
+}
+
+async function postCompletion(body, options) {
+  try {
+    return await fetch(`${config.llm.baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${config.llm.apiKey}`,
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(options.timeoutMs ?? 180000),
+    });
+  } catch (error) {
+    throw new LlmError(`Could not reach the model endpoint: ${error.message}`);
+  }
+}
+
 export async function chatJson(messages, options = {}) {
   if (!config.llm.apiKey) {
     throw new LlmError(
@@ -108,22 +157,20 @@ export async function chatJson(messages, options = {}) {
     messages,
     temperature: options.temperature ?? config.llm.temperature,
     max_tokens: options.maxTokens ?? config.llm.maxTokens,
-    response_format: { type: "json_object" },
+    response_format: responseFormat(),
   };
 
-  let response;
-  try {
-    response = await fetch(`${config.llm.baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${config.llm.apiKey}`,
-      },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(options.timeoutMs ?? 180000),
-    });
-  } catch (error) {
-    throw new LlmError(`Could not reach the model endpoint: ${error.message}`);
+  let response = await postCompletion(body, options);
+
+  // Not every compatible endpoint accepts json_schema; fall back once and remember it.
+  if (
+    !response.ok &&
+    body.response_format.type === "json_schema" &&
+    (response.status === 400 || response.status === 404 || response.status === 422)
+  ) {
+    schemaSupported = false;
+    body.response_format = { type: "json_object" };
+    response = await postCompletion(body, options);
   }
 
   if (!response.ok) {

@@ -54,7 +54,7 @@ Dùng cho phối hợp MEP và kiểm tra va chạm: chi tiết hơn LOD 300 nh�
 - Mọi chi tiết nhỏ (bích, bulông, lỗ) đều phải tham chiếu tham số, không hardcode.`,
 };
 
-function lodStandard(lod) {
+export function lodStandard(lod) {
   const level = LOD_LEVELS.includes(Number(lod)) ? Number(lod) : DEFAULT_LOD;
   return `${LOD_STANDARDS[level]}
 
@@ -181,6 +181,11 @@ export async function design({ prompt, currentSpec, lod, emit, model, attachment
     }
 
     usage = result.usage ?? usage;
+
+    console.log(
+      `[design] attempt ${attempt} answered in ${Math.round((Date.now() - startedAt) / 1000)}s` +
+        `${result.usage?.total_tokens ? `, ${result.usage.total_tokens} tokens` : ""}`,
+    );
 
     emit({ type: "stage", stage: "checking", message: "Checking the model" });
     analysis = analyzeSpec(result.json);

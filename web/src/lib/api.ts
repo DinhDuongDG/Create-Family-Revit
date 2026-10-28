@@ -186,6 +186,7 @@ export interface BuildStats {
   lod?: number | null;
   driving?: string[];
   unlabelled?: string[];
+  inert?: string[];
 }
 
 export interface BuildResult {

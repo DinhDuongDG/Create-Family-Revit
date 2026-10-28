@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { FamilyParameter, MaterialDef, ResolvedModel } from "@family/spec-core";
+import type { FamilyParameter, MaterialDef, ResolvedModel, ResolvedPart } from "@family/spec-core";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { formatDimensions, type Units } from "../lib/format";
 import { buildPartGeometry, partColor, partMaterialProps } from "../lib/three-build";
+
+interface PartCacheEntry {
+  signature: string;
+  group: THREE.Group;
+  disposables: { dispose: () => void }[];
+}
 
 interface Props {
   model: ResolvedModel | null;
@@ -116,6 +122,9 @@ export function Viewer({
 
   const [visiblePartCount, setVisiblePartCount] = useState<number>(0);
   const prevModelRef = useRef<ResolvedModel | null>(null);
+  // Rendered parts survive re-runs of the scene effect: only new or changed parts are
+  // rebuilt, so the assembly animation adds meshes instead of redrawing everything.
+  const partCacheRef = useRef(new Map<string, PartCacheEntry>());
 
   const [animatingPartName, setAnimatingPartName] = useState<string | null>(null);
   const [turntableActive, setTurntableActive] = useState<boolean>(false);
@@ -893,6 +902,10 @@ export function Viewer({
       renderer.domElement.removeEventListener("click", onCanvasClick);
       controls.dispose();
       renderer.dispose();
+      for (const entry of partCacheRef.current.values()) {
+        for (const item of entry.disposables) item.dispose();
+      }
+      partCacheRef.current.clear();
       if (renderer.domElement.parentElement === host) host.removeChild(renderer.domElement);
       if (cubeRenderer && cubeHost && cubeRenderer.domElement.parentElement === cubeHost) {
         cubeHost.removeChild(cubeRenderer.domElement);
@@ -985,30 +998,32 @@ export function Viewer({
 
     for (const item of state.disposables) item.dispose();
     state.disposables = [];
-    state.content.clear();
-
     state.grid.visible = showGrid;
 
-    if (!model) return;
+    const partCache = partCacheRef.current;
 
-    const materialCache = new Map<string, THREE.MeshStandardMaterial>();
-    const edgeMaterial = new THREE.LineBasicMaterial({
-      color: 0x30373b,
-      transparent: true,
-      opacity: 0.18,
-    });
-    state.disposables.push(edgeMaterial);
+    const dropEntry = (entry: PartCacheEntry) => {
+      state.content.remove(entry.group);
+      for (const item of entry.disposables) item.dispose();
+    };
+
+    if (!model) {
+      for (const entry of partCache.values()) dropEntry(entry);
+      partCache.clear();
+      return;
+    }
 
     const limitParts = visiblePartCount > 0 ? visiblePartCount : model.parts.length;
     const partsToRender = model.parts.slice(0, limitParts);
+    const wanted = new Set<string>();
 
-    for (const part of partsToRender) {
-      if (hiddenPartIds.includes(part.id)) {
-        continue;
-      }
+    const buildEntry = (part: ResolvedPart, signature: string): PartCacheEntry => {
+      const disposables: { dispose: () => void }[] = [];
+      const group = new THREE.Group();
+      group.name = part.id;
 
       const { geometry } = buildPartGeometry(part);
-      state.disposables.push(geometry);
+      disposables.push(geometry);
 
       const color = partColor(part, materials);
       const props = partMaterialProps(part, materials);
@@ -1018,30 +1033,21 @@ export function Viewer({
       const isTransparent = transparentPartIds.includes(part.id) || isClearance;
       // The part being assembled glows for a moment so the build reads part by part.
       const isAnimating = Boolean(animatingPartName) && part.name === animatingPartName;
-      const key = `${color}|${props.metalness}|${props.roughness}|${isTransparent ? (isClearance ? "clearance" : "trans") : "solid"}|${isAnimating ? "hot" : "cool"}`;
-
       const activeOpacity = isTransparent ? (isClearance ? 0.22 : 0.35) : 1.0;
 
-      let material: THREE.MeshStandardMaterial;
-
-      if (isSelected) {
-        // Giữ màu gốc của part, chỉ làm mờ/bán trong suốt (translucent) nhẹ kèm viền xanh nổi bật
-        material = new THREE.MeshStandardMaterial({
-          color: new THREE.Color(color),
-          metalness: Math.max(0.1, props.metalness),
-          roughness: Math.max(0.2, props.roughness),
-          transparent: true,
-          opacity: 0.55, // Mờ nhẹ thanh thoát
-          depthWrite: false,
-          polygonOffset: true,
-          polygonOffsetFactor: -1,
-          polygonOffsetUnits: -1,
-        });
-        state.disposables.push(material);
-      } else {
-        let cached = materialCache.get(key);
-        if (!cached) {
-          cached = new THREE.MeshStandardMaterial({
+      const material = isSelected
+        ? new THREE.MeshStandardMaterial({
+            color: new THREE.Color(color),
+            metalness: Math.max(0.1, props.metalness),
+            roughness: Math.max(0.2, props.roughness),
+            transparent: true,
+            opacity: 0.55, // Mờ nhẹ thanh thoát
+            depthWrite: false,
+            polygonOffset: true,
+            polygonOffsetFactor: -1,
+            polygonOffsetUnits: -1,
+          })
+        : new THREE.MeshStandardMaterial({
             color: new THREE.Color(color),
             metalness: props.metalness,
             roughness: props.roughness,
@@ -1054,39 +1060,41 @@ export function Viewer({
             polygonOffsetFactor: 1,
             polygonOffsetUnits: 1,
           });
-          materialCache.set(key, cached);
-          state.disposables.push(cached);
-        }
-        material = cached;
-      }
+      disposables.push(material);
 
-      let edges: THREE.LineSegments | null = null;
+      let edgeGeometry: THREE.EdgesGeometry | null = null;
+      let edgeMaterial: THREE.LineBasicMaterial | null = null;
+
       if (part.cuts.length === 0) {
-        const edgeGeometry = new THREE.EdgesGeometry(geometry, 24);
-        state.disposables.push(edgeGeometry);
-        const thisEdgeMat = isSelected
-          ? new THREE.LineBasicMaterial({
-              color: 0x0078d4, // Viền xanh Revit sắc nét bao quanh part đang chọn
-              linewidth: 2,
-              transparent: false,
-              opacity: 1.0,
-            })
-          : isAnimating
-          ? new THREE.LineBasicMaterial({
-              color: 0x2f7d5b, // green edge on the part that just appeared
-              linewidth: 2,
-              transparent: true,
-              opacity: 0.95,
-            })
-          : isTransparent
-          ? new THREE.LineBasicMaterial({
-              color: 0x30373b,
-              transparent: true,
-              opacity: 0.1,
-            })
-          : edgeMaterial;
-        if (isSelected || isTransparent || isAnimating) state.disposables.push(thisEdgeMat);
-        edges = new THREE.LineSegments(edgeGeometry, thisEdgeMat);
+        edgeGeometry = new THREE.EdgesGeometry(geometry, 24);
+        edgeMaterial = new THREE.LineBasicMaterial(
+          isSelected
+            ? {
+                color: 0x0078d4, // Viền xanh Revit sắc nét bao quanh part đang chọn
+                linewidth: 2,
+                transparent: false,
+                opacity: 1.0,
+              }
+            : isAnimating
+              ? {
+                  color: 0x2f7d5b, // green edge on the part that just appeared
+                  linewidth: 2,
+                  transparent: true,
+                  opacity: 0.95,
+                }
+              : isTransparent
+                ? {
+                    color: 0x30373b,
+                    transparent: true,
+                    opacity: 0.1,
+                  }
+                : {
+                    color: 0x30373b,
+                    transparent: true,
+                    opacity: 0.18,
+                  },
+        );
+        disposables.push(edgeGeometry, edgeMaterial);
       }
 
       for (let index = 0; index < part.array.count; index += 1) {
@@ -1096,15 +1104,49 @@ export function Viewer({
         mesh.position.set(offset.x, offset.y, offset.z);
         mesh.name = part.name;
         mesh.userData = { partId: part.id, partName: part.name };
-        state.content.add(mesh);
+        group.add(mesh);
 
-        if (edges) {
-          const clone = edges.clone();
+        if (edgeGeometry && edgeMaterial) {
+          const clone = new THREE.LineSegments(edgeGeometry, edgeMaterial);
           clone.position.copy(mesh.position);
           clone.userData = { partId: part.id };
-          state.content.add(clone);
+          group.add(clone);
         }
       }
+
+      state.content.add(group);
+      return { signature, group, disposables };
+    };
+
+    for (const part of partsToRender) {
+      if (hiddenPartIds.includes(part.id)) continue;
+
+      wanted.add(part.id);
+
+      const signature = [
+        JSON.stringify(part.solid),
+        JSON.stringify(part.cuts),
+        JSON.stringify(part.array),
+        part.name,
+        part.material ?? "",
+        part.color ?? "",
+        selectedPartId === part.id ? "selected" : "",
+        transparentPartIds.includes(part.id) ? "transparent" : "",
+        animatingPartName === part.name ? "hot" : "",
+        materials.map((material) => `${material.name}:${material.color ?? ""}`).join(","),
+      ].join("|");
+
+      const existing = partCache.get(part.id);
+      if (existing && existing.signature === signature) continue;
+      if (existing) dropEntry(existing);
+
+      partCache.set(part.id, buildEntry(part, signature));
+    }
+
+    for (const [id, entry] of partCache) {
+      if (wanted.has(id)) continue;
+      dropEntry(entry);
+      partCache.delete(id);
     }
 
     const size = Math.max(model.bounds?.size.x ?? 0, model.bounds?.size.y ?? 0, 3000);

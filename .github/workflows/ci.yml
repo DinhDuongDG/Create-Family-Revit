@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  studio:
+    name: studio (core, server, web)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # Some machines export NODE_ENV=production, which would skip devDependencies
+      # (typescript, vitest, vite), so ask for them explicitly.
+      - name: Install
+        run: npm ci --include=dev
+
+      - name: Build spec-core
+        run: npm run build:core
+
+      - name: Test spec-core
+        run: npm run test -w @family/spec-core
+
+      - name: Test server
+        run: npm run test -w server
+
+      - name: Build web
+        run: npm run build -w web
+
+  core:
+    name: add-in core (c#)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      # The Revit add-in itself needs the Revit API DLLs, which only exist on a
+      # machine with Revit installed, so CI builds and tests FamilyAgent.Core.
+      - name: Build core
+        run: dotnet build revit-addin/FamilyAgent.Core/FamilyAgent.Core.csproj -c Release
+
+      - name: Self-test
+        run: dotnet run --project revit-addin/FamilyAgent.SelfTest/FamilyAgent.SelfTest.csproj -c Release
