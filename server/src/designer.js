@@ -10,6 +10,10 @@ const repairPrompt = fs.readFileSync(path.join(config.dirs.prompts, "repair.md")
 
 const MAX_ATTEMPTS = 3;
 
+const PROSE_REPAIR = `That answer was not a JSON object, so it cannot be built. Reply with ONE JSON object and nothing else:
+no headings, no bullet lists, no design document, no commentary, no code fences.
+It must start with { and end with }, and contain schemaVersion, name, category, parameters, materials and parts.`;
+
 export const LOD_LEVELS = [200, 300, 400];
 export const DEFAULT_LOD = 300;
 
@@ -118,7 +122,10 @@ export async function design({ prompt, currentSpec, lod, emit, model, attachment
     }
   }
 
-  messages.push({ role: "user", content: prompt });
+  messages.push({
+    role: "user",
+    content: `${prompt}\n\n---\nReturn the family spec as ONE JSON object only — no markdown, no headings, no explanation.`,
+  });
 
   const modelOptions = {
     ...(model ? { model } : {}),
@@ -137,7 +144,7 @@ export async function design({ prompt, currentSpec, lod, emit, model, attachment
     attempts = attempt;
     if (attempt === 1) {
       emit({ type: "stage", stage: "generating", message: "Sketching the outline" });
-    } else {
+    } else if (analysis) {
       emit({
         type: "stage",
         stage: "repairing",
@@ -145,7 +152,25 @@ export async function design({ prompt, currentSpec, lod, emit, model, attachment
       });
     }
 
-    const result = await generateJson(messages, modelOptions);
+    let result;
+
+    try {
+      result = await generateJson(messages, modelOptions);
+    } catch (error) {
+      // The model sometimes answers with a design document instead of the JSON object.
+      // Feed it back and ask again instead of failing the whole run.
+      if (error?.name !== "LlmError" || attempt >= MAX_ATTEMPTS) throw error;
+
+      emit({ type: "stage", stage: "repairing", message: "The answer was prose — asking for the JSON spec again" });
+
+      if (typeof error.text === "string" && error.text.trim()) {
+        messages.push({ role: "assistant", content: error.text.slice(0, 20000) });
+      }
+
+      messages.push({ role: "user", content: PROSE_REPAIR });
+      continue;
+    }
+
     usage = result.usage ?? usage;
 
     emit({ type: "stage", stage: "checking", message: "Checking the model" });

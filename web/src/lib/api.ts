@@ -153,6 +153,19 @@ export async function streamDesign(
   }
 }
 
+export interface BuildStats {
+  parts?: number;
+  instances?: number;
+  forms?: number;
+  voids?: number;
+  refPlanes?: number;
+  refDimensions?: number;
+  locks?: number;
+  lod?: number | null;
+  driving?: string[];
+  unlabelled?: string[];
+}
+
 export interface BuildResult {
   ok: boolean;
   mode?: "revit" | "queue";
@@ -165,6 +178,7 @@ export interface BuildResult {
   elapsedMs?: number;
   busy?: boolean;
   issues?: Issue[];
+  stats?: BuildStats;
 }
 
 export async function buildFamily(spec: FamilySpec): Promise<BuildResult> {

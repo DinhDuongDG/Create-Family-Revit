@@ -21,15 +21,26 @@ function stripFences(text) {
   return trimmed;
 }
 
+function noJsonError(text) {
+  const preview = text.replace(/\s+/g, " ").trim().slice(0, 120);
+  const error = new LlmError(
+    `The model replied with text instead of a JSON spec: "${preview}${preview.length >= 120 ? "…" : ""}"`,
+  );
+  error.text = text;
+  return error;
+}
+
 export function parseModelJson(text) {
   let clean = stripFences(text);
 
   // If text starts with python snippet or preface, find the first '{' and last '}'
   const firstBrace = clean.indexOf("{");
   const lastBrace = clean.lastIndexOf("}");
-  if (firstBrace >= 0 && lastBrace > firstBrace) {
-    clean = clean.slice(firstBrace, lastBrace + 1);
+  if (firstBrace < 0 || lastBrace <= firstBrace) {
+    throw noJsonError(text);
   }
+
+  clean = clean.slice(firstBrace, lastBrace + 1);
 
   // 1. Try direct parse
   try {
@@ -69,7 +80,9 @@ export function parseModelJson(text) {
       try {
         return JSON.parse(jsonrepair(sanitized));
       } catch (errFinal) {
-        throw new LlmError(`JSON parsing error: ${err1.message}`);
+        const error = new LlmError(`JSON parsing error: ${err1.message}`);
+        error.text = text;
+        throw error;
       }
     }
   }

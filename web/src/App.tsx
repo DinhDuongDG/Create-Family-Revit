@@ -398,10 +398,31 @@ export function App() {
       const result = await buildFamily({ ...spec, revitVersion });
       if (result.ok && result.path) {
         setNative(true);
+
+        const driving = result.stats?.driving ?? [];
+        const unlabelled = result.stats?.unlabelled ?? [];
+        const notes = [
+          ...(result.warnings ?? []),
+          ...unlabelled.map((item) => `Chưa dẫn động: ${item}`),
+        ].slice(0, 8);
+
+        pushEntry({
+          role: "agent",
+          text:
+            `Đã xuất ${spec.name}.rfa (Revit ${result.revitVersion ?? revitVersion}).\n` +
+            `${driving.length} tham số dẫn động · ${result.stats?.locks ?? 0} ràng buộc hình học` +
+            `${result.stats?.refPlanes ? ` · ${result.stats.refPlanes} reference plane` : ""}`,
+          notes: notes.length > 0 ? notes : undefined,
+          meta: result.path,
+          tone: driving.length === 0 ? "error" : undefined,
+        });
+
         setToast({
           text: "Revit family built successfully!",
-          sub: result.path,
-          tone: "ok",
+          sub: driving.length === 0
+            ? "Cảnh báo: chưa có tham số nào được gắn nhãn dimension — đổi thông số sẽ không đổi hình."
+            : `${driving.length} tham số dẫn động hình học · ${result.path}`,
+          tone: driving.length === 0 ? "warn" : "ok",
         });
         // Automatically trigger download of the .rfa file
         const link = document.createElement("a");

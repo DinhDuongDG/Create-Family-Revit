@@ -223,23 +223,19 @@ export function TopBar({
           </button>
         </div>
 
-        <div className="lod-group" title="Mức độ chi tiết (Level of Detail) khi dựng family">
-          <span className="lod-label">LOD</span>
-          <div className="segmented" role="group" aria-label="Level of detail">
-            {LOD_OPTIONS.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                className={lod === option.value ? "active" : ""}
-                onClick={() => onLod(option.value)}
-                title={option.hint}
-                aria-pressed={lod === option.value}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-        </div>
+        <select
+          className="select lod-select"
+          value={lod}
+          onChange={(event) => onLod(Number(event.target.value) as Lod)}
+          aria-label="Level of detail (LOD)"
+          title={LOD_OPTIONS.find((option) => option.value === lod)?.hint ?? "Level of detail"}
+        >
+          {LOD_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value} title={option.hint}>
+              LOD {option.label}
+            </option>
+          ))}
+        </select>
 
         <select
           className="select"
