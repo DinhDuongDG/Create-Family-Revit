@@ -108,6 +108,18 @@ namespace FamilyAgent.Addin
                 {
                     if (context.Request.HttpMethod == "POST" && path == "/inspect")
                     {
+                        // Diagnostic endpoint: only when the operator opts in.
+                        if (Environment.GetEnvironmentVariable("FAMILY_AGENT_INSPECT") != "1")
+                        {
+                            Respond(context, 404,
+                                JsonConvert.SerializeObject(new
+                                {
+                                    ok = false,
+                                    error = "Inspect is disabled. Start Revit with FAMILY_AGENT_INSPECT=1 to enable it.",
+                                }));
+                            return;
+                        }
+
                         string inspectBody;
                         using (var reader = new StreamReader(context.Request.InputStream, Encoding.UTF8))
                         {

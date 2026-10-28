@@ -322,10 +322,22 @@ export function App() {
     setStage({ stage: "thinking", message: docs.length > 0 ? "Reading attached documents" : "Reading the brief" });
 
     let failed = false;
+    let stalled = false;
+    let receivedSpec = false;
+    let lastBeat = Date.now();
 
     const controller = new AbortController();
     abortRef.current = controller;
     setLastBeatAt(Date.now());
+
+    // A restarted server (npm run dev reloads on every file change) leaves the SSE
+    // connection open with no data. Abort instead of waiting forever.
+    const watchdog = window.setInterval(() => {
+      if (Date.now() - lastBeat > 30000 && !controller.signal.aborted) {
+        stalled = true;
+        controller.abort();
+      }
+    }, 5000);
 
     try {
       await streamDesign(
@@ -350,6 +362,7 @@ export function App() {
           }
 
           const { stats } = event;
+          receivedSpec = true;
           setSpec(event.spec);
           setNative(false);
           const dims = stats.bounds ? `${stats.bounds.x} × ${stats.bounds.y} × ${stats.bounds.z} mm` : "";
@@ -358,15 +371,36 @@ export function App() {
             role: "agent",
             text: `${hadSpec ? "Đã cập nhật" : "Đã tạo"} ${event.spec.name}.\n${stats.parts} chi tiết · ${stats.parameters} tham số${stats.lod ? ` · LOD ${stats.lod}` : ""}${dims ? ` · ${dims}` : ""}`,
             notes: event.spec.notes,
-            meta: `${formatDuration(stats.elapsedMs)}${stats.attempts > 1 ? ` · ${stats.attempts} lượt` : ""}`,
+            meta: `${formatDuration(stats.elapsedMs)}${stats.attempts > 1 ? ` · ${stats.attempts} lượt` : ""}${stats.usage?.total_tokens ? ` · ${Math.round(stats.usage.total_tokens / 1000)}k tokens` : ""}`,
             issues: [...event.errors, ...event.issues.filter((issue) => issue.severity === "warning")].slice(0, 12),
           });
         },
         controller.signal,
-        () => setLastBeatAt(Date.now()),
+        () => {
+          lastBeat = Date.now();
+          setLastBeatAt(lastBeat);
+        },
       );
+
+      if (!receivedSpec && !stalled) {
+        failed = true;
+        pushEntry({
+          role: "agent",
+          text: "Server đóng kết nối mà chưa trả về spec — có thể API vừa restart. Bấm gửi lại yêu cầu.",
+          tone: "error",
+        });
+      }
     } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") {
+      if (stalled) {
+        failed = true;
+        pushEntry({
+          role: "agent",
+          text:
+            "Không nhận được phản hồi từ server quá 30 giây nên đã dừng.\n" +
+            "Thường là do API vừa restart (`npm run dev` reload khi có file thay đổi) — kiểm tra pill trạng thái rồi gửi lại.",
+          tone: "error",
+        });
+      } else if (error instanceof Error && error.name === "AbortError") {
         pushEntry({ role: "agent", text: "Stopped." });
       } else {
         const message = error instanceof Error ? error.message : String(error);
@@ -375,6 +409,7 @@ export function App() {
         void pingServer().then((ping) => setServerOnline(Boolean(ping?.ok)));
       }
     } finally {
+      window.clearInterval(watchdog);
       abortRef.current = null;
       setRunning(false);
       setRunStartedAt(null);
@@ -456,9 +491,11 @@ export function App() {
 
         const driving = result.stats?.driving ?? [];
         const unlabelled = result.stats?.unlabelled ?? [];
+        const inert = result.stats?.inert ?? [];
         const notes = [
           ...(result.warnings ?? []),
           ...unlabelled.map((item) => `Chưa dẫn động: ${item}`),
+          ...inert.map((name) => `Có nhãn nhưng chưa kéo được hình: ${name}`),
         ].slice(0, 8);
 
         pushEntry({
