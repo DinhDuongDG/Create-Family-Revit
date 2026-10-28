@@ -14,7 +14,7 @@ const PROSE_REPAIR = `That answer was not a JSON object, so it cannot be built. 
 no headings, no bullet lists, no design document, no commentary, no code fences.
 It must start with { and end with }, and contain schemaVersion, name, category, parameters, materials and parts.`;
 
-export const LOD_LEVELS = [200, 300, 400];
+export const LOD_LEVELS = [200, 300, 350, 400];
 export const DEFAULT_LOD = 300;
 
 const LOD_STANDARDS = {
@@ -35,6 +35,15 @@ Mục tiêu: family đáp ứng thiết kế, định tuyến MEP và xuất kh�
   1. **Hình khối bao chính xác**: kích thước dài x rộng x cao, tỷ lệ chuẩn catalog.
   2. **Cổng kết nối MEP chuẩn vị trí**: miệng gió, cổ bích, đầu ống cấp/hồi/xả nhô ra đúng vị trí và đường kính danh định.
   3. **Hệ thống tham số thông minh**: kích thước gắn với tham số nhóm \`Dimensions\` để co dãn khi đổi Type.`,
+
+  350: `Mức chi tiết đang dựng: **LOD 350 — Chi tiết phối hợp / lắp đặt (coordination)**.
+
+Dùng cho phối hợp MEP và kiểm tra va chạm: chi tiết hơn LOD 300 nhưng chưa tới mức chế tạo.
+- **Số lượng parts**: 10 đến 30 parts.
+- Dựng thêm so với LOD 300: cổ bích và mặt bích kết nối, tai treo / giá đỡ / thanh treo ren, gối đỡ ống, cửa thăm có bản lề, tấm chắn, vùng bảo dưỡng (clearance) và các chi tiết định vị cụm thiết bị.
+- Thể hiện rõ **điểm kết nối** (miệng gió, đầu ống, hộp điện) đúng vị trí và đường kính danh định để phối hợp với ống gió/ống nước trong mô hình.
+- **Không** dựng bulông li ti, gioăng, ren, lỗ khoan ren, đường hàn — đó là LOD 400.
+- **Tham số**: 10 đến 26 tham số, gồm kích thước bao, kích thước cụm lắp đặt (khoảng cách tai treo, cao độ đầu ống) và thông số MEP.`,
 
   400: `Mức chi tiết đang dựng: **LOD 400 — Chi tiết chế tạo / lắp ráp**.
 

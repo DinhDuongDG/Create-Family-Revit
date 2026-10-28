@@ -110,7 +110,7 @@ export async function uploadDocument(file: File): Promise<UploadedDocument> {
   return payload as UploadedDocument;
 }
 
-export type Lod = 200 | 300 | 400;
+export type Lod = 200 | 300 | 350 | 400;
 
 export async function streamDesign(
   payload: {

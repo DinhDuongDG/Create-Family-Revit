@@ -276,9 +276,9 @@ namespace FamilyAgent.Addin
         {
             var detail = lod == 200
                 ? ViewDetailLevel.Coarse
-                : lod == 300
-                    ? ViewDetailLevel.Medium
-                    : ViewDetailLevel.Fine;
+                : lod == 400
+                    ? ViewDetailLevel.Fine
+                    : ViewDetailLevel.Medium;
 
             try
             {

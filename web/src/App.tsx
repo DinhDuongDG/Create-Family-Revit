@@ -77,7 +77,7 @@ function storeWidth(key: string, value: number): void {
   }
 }
 
-const LOD_LEVELS: Lod[] = [200, 300, 400];
+const LOD_LEVELS: Lod[] = [200, 300, 350, 400];
 
 function readStoredLod(): Lod {
   try {
