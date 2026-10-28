@@ -12,11 +12,12 @@ import fcuExampleRaw from "../../spec/examples/fcu-080.json";
 import pumpExampleRaw from "../../spec/examples/pump-dn80.json";
 import { ChatPanel, type ChatEntry } from "./components/ChatPanel";
 import { ParameterPanel } from "./components/ParameterPanel";
-import { TopBar } from "./components/TopBar";
+import { TopBar, type AgentPill } from "./components/TopBar";
 import { Viewer } from "./components/Viewer";
 import {
   buildFamily,
   fetchHealth,
+  pingServer,
   streamDesign,
   uploadDocument,
   fetchSavedModels,
@@ -116,6 +117,9 @@ export function App() {
   const [hiddenPartIds, setHiddenPartIds] = useState<string[]>([]);
   const [transparentPartIds, setTransparentPartIds] = useState<string[]>([]);
   const [health, setHealth] = useState<Health | null>(null);
+  const [serverOnline, setServerOnline] = useState<boolean | null>(null);
+  const [agentReady, setAgentReady] = useState<boolean | null>(null);
+  const [lastBeatAt, setLastBeatAt] = useState<number | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [currentModelId, setCurrentModelId] = useState<string | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
@@ -187,19 +191,35 @@ export function App() {
 
   useEffect(() => {
     let alive = true;
-    fetchHealth().then((result) => {
-      if (alive) {
-        setHealth(result);
-        if (result && result.agent?.model && result.agent.model.startsWith("agy:")) {
-          setModel(result.agent.model);
-        } else if (result && result.models && result.models.length > 0) {
-          const firstAgy = result.models.find((m) => m.id.startsWith("agy:"));
-          if (firstAgy) setModel((curr) => curr || firstAgy.id);
-        }
+
+    // Heavy endpoint: only once, for the model list.
+    void fetchHealth().then((result) => {
+      if (!alive || !result) return;
+      setHealth(result);
+      if (result.agent?.model && result.agent.model.startsWith("agy:")) {
+        setModel(result.agent.model);
+      } else if (result.models && result.models.length > 0) {
+        const firstAgy = result.models.find((m) => m.id.startsWith("agy:"));
+        if (firstAgy) setModel((curr) => curr || firstAgy.id);
       }
     });
+
+    const probe = async () => {
+      const ping = await pingServer();
+      if (!alive) return;
+      setServerOnline(Boolean(ping?.ok));
+      if (ping) setAgentReady(Boolean(ping.agent?.ready));
+    };
+
+    void probe();
+    const timer = window.setInterval(probe, 5000);
+    const onFocus = () => void probe();
+    window.addEventListener("focus", onFocus);
+
     return () => {
       alive = false;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
     };
   }, []);
 
@@ -211,6 +231,33 @@ export function App() {
 
   const elapsed = runStartedAt ? Math.max(0, Math.floor((now - runStartedAt) / 1000)) : 0;
   const elapsedLabel = running && runStartedAt ? `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, "0")}` : null;
+
+  const beatAge = lastBeatAt ? Math.max(0, Math.floor((now - lastBeatAt) / 1000)) : null;
+  const beatLabel = beatAge === null ? "" : beatAge < 1 ? "vừa xong" : `${beatAge}s trước`;
+
+  const agentStatus: AgentPill = serverOnline === false
+    ? {
+        tone: "error",
+        text: "Mất kết nối server",
+        hint: "API 8787 không phản hồi — kiểm tra `npm run dev` rồi thử lại.",
+      }
+    : running
+      ? beatAge !== null && beatAge > 25
+        ? {
+            tone: "warn",
+            text: `Đang chờ · ${elapsedLabel ?? ""}`.trim(),
+            hint: `Không có phản hồi từ server ${beatAge}s. Agent có thể đang suy nghĩ rất lâu hoặc đã treo — bấm Stop nếu quá 10 phút.`,
+          }
+        : {
+            tone: "ok",
+            text: `Agent đang chạy · ${elapsedLabel ?? ""}`.trim(),
+            hint: `Server còn sống · nhịp cuối ${beatLabel}`,
+          }
+      : agentReady
+        ? { tone: "ok", text: "Agent sẵn sàng", hint: health?.agent?.detail }
+        : agentReady === false
+          ? { tone: "warn", text: "Agent chưa sẵn sàng", hint: health?.agent?.detail }
+          : { tone: "warn", text: "Đang kiểm tra server…", hint: "Chưa nhận được phản hồi từ API 8787." };
 
   useEffect(() => {
     if (!toast) return;
@@ -278,6 +325,7 @@ export function App() {
 
     const controller = new AbortController();
     abortRef.current = controller;
+    setLastBeatAt(Date.now());
 
     try {
       await streamDesign(
@@ -315,6 +363,7 @@ export function App() {
           });
         },
         controller.signal,
+        () => setLastBeatAt(Date.now()),
       );
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") {
@@ -322,6 +371,8 @@ export function App() {
       } else {
         const message = error instanceof Error ? error.message : String(error);
         pushEntry({ role: "agent", text: message, tone: "error" });
+        // Find out right away whether the API itself is down.
+        void pingServer().then((ping) => setServerOnline(Boolean(ping?.ok)));
       }
     } finally {
       abortRef.current = null;
@@ -754,6 +805,7 @@ export function App() {
         native={native}
         running={running}
         agentStage={stage?.stage ?? null}
+        agentStatus={agentStatus}
         units={units}
         onUnits={setUnits}
         revitVersion={revitVersion}

@@ -2,6 +2,12 @@ import { useState, useRef, useEffect } from "react";
 import type { Units } from "../lib/format";
 import type { Lod } from "../lib/api";
 
+export interface AgentPill {
+  tone: "ok" | "warn" | "error";
+  text: string;
+  hint?: string;
+}
+
 interface Props {
   name: string;
   category: string;
@@ -10,6 +16,7 @@ interface Props {
   native: boolean;
   running?: boolean;
   agentStage?: string | null;
+  agentStatus?: AgentPill;
   units: Units;
   onUnits: (units: Units) => void;
   revitVersion: string;
@@ -57,6 +64,7 @@ export function TopBar({
   native,
   running,
   agentStage,
+  agentStatus,
   units,
   onUnits,
   revitVersion,
@@ -129,6 +137,16 @@ export function TopBar({
       </div>
 
       <div className="top-actions">
+        {agentStatus && (
+          <span
+            className={`agent-pill ${agentStatus.tone} ${agentStatus.tone === "ok" ? "agent-pill-pulse" : ""}`}
+            title={agentStatus.hint ?? agentStatus.text}
+          >
+            <span className="agent-pill-dot" />
+            <span className="agent-pill-text">{agentStatus.text}</span>
+          </span>
+        )}
+
         {onLoadDemo && (
           <div className="demo-dropdown-container" ref={dropdownRef}>
             <button
