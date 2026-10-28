@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text;
 using Autodesk.Revit.ApplicationServices;
 using Autodesk.Revit.DB;
+using Autodesk.Revit.UI;
 using FamilyAgent.Core;
 using CoreParameterSet = FamilyAgent.Core.ParameterSet;
 
@@ -25,6 +26,133 @@ namespace FamilyAgent.Addin
     {
         private const double MmPerFoot = 304.8;
         private const double DegToRad = Math.PI / 180.0;
+
+        /// <summary>
+        /// Diagnostic: opens a built .rfa, changes one parameter and reports whether the
+        /// geometry rebuilt. Proves the constraints really flex in the saved file.
+        /// </summary>
+        public static object Inspect(UIApplication uiApp, string path, string parameter, double percent)
+        {
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+                throw new FileNotFoundException("Family not found", path);
+
+            // Headless open: the document can be closed reliably, unlike a UI tab opened
+            // with OpenAndActivateDocument which keeps the .rfa locked for the next build.
+            var document = uiApp.Application.OpenDocumentFile(path);
+
+            try
+            {
+                var manager = document.FamilyManager;
+                var planes = new FilteredElementCollector(document)
+                    .OfClass(typeof(ReferencePlane))
+                    .Cast<ReferencePlane>()
+                    .ToList();
+                var dimensions = new FilteredElementCollector(document)
+                    .OfClass(typeof(Dimension))
+                    .Cast<Dimension>()
+                    .ToList();
+
+                var labelled = 0;
+                var labelledNames = new List<string>();
+                foreach (var dimension in dimensions)
+                {
+                    try
+                    {
+                        var label = dimension.FamilyLabel;
+                        if (label == null) continue;
+                        labelled += 1;
+                        labelledNames.Add(label.Definition?.Name ?? "?");
+                    }
+                    catch
+                    {
+                        // Some dimension types cannot carry a label.
+                    }
+                }
+
+                var parameterNames = new List<string>();
+                foreach (Autodesk.Revit.DB.FamilyParameter candidate in manager.Parameters)
+                {
+                    try
+                    {
+                        if (candidate.Definition != null) parameterNames.Add(candidate.Definition.Name);
+                    }
+                    catch
+                    {
+                        // Ignore stale parameters.
+                    }
+                }
+
+                var familyParameter = FindParameter(manager, parameter);
+                if (familyParameter == null)
+                {
+                    return new
+                    {
+                        ok = false,
+                        error = $"Parameter \"{parameter}\" not found in {Path.GetFileName(path)}",
+                        planes = planes.Count,
+                        dimensions = dimensions.Count,
+                        labelled,
+                        labelledNames,
+                        parameterNames,
+                        pinned = planes.Count(plane => plane.Pinned),
+                    };
+                }
+
+                var current = document.FamilyManager.CurrentType?.AsDouble(familyParameter) ?? 0;
+                var before = ModelSignature(document);
+                var moved = false;
+                var commit = "n/a";
+
+                using (var transaction = new Transaction(document, "Family Agent — inspect"))
+                {
+                    transaction.Start();
+                    manager.Set(familyParameter, current * (1.0 + percent / 100.0) + 0.001);
+                    document.Regenerate();
+                    moved = Math.Abs(before - ModelSignature(document)) > 1e-9;
+                    commit = transaction.RollBack().ToString();
+                }
+
+                return new
+                {
+                    ok = true,
+                    parameter,
+                    valueMm = Math.Round(current * MmPerFoot, 1),
+                    percent,
+                    commit,
+                    moved,
+                    planes = planes.Count,
+                    pinned = planes.Count(plane => plane.Pinned),
+                    dimensions = dimensions.Count,
+                    labelled,
+                    labelledNames,
+                    parameterNames,
+                };
+            }
+            finally
+            {
+                try
+                {
+                    document.Close(false);
+                }
+                catch
+                {
+                    // Fall through to the UI close below.
+                }
+
+                try
+                {
+                    var stillOpen = uiApp.Application.Documents
+                        .Cast<Document>()
+                        .Any(open => string.Equals(open.PathName, path, StringComparison.OrdinalIgnoreCase));
+
+                    if (stillOpen) uiApp.ActiveUIDocument?.SaveAndClose();
+                }
+                catch
+                {
+                    // Leave it open rather than crash the inspect.
+                }
+            }
+        }
 
         public static BuildResult Build(Application app, string json)
         {
@@ -96,6 +224,8 @@ namespace FamilyAgent.Addin
                     refDimensions,
                     locks,
                     lod = spec.Lod,
+                    driving = skeleton.Driving,
+                    unlabelled = skeleton.Unlabelled,
                     parameters = parameters.Ordered.Count,
                     bounds = new
                     {
@@ -375,6 +505,8 @@ namespace FamilyAgent.Addin
             public int Created;
             public readonly List<SkeletonPlane> Planes = new List<SkeletonPlane>();
             public readonly List<PlaneDimension> Dimensions = new List<PlaneDimension>();
+            public readonly List<string> Driving = new List<string>();
+            public readonly List<string> Unlabelled = new List<string>();
 
             public ReferencePlane Find(PlaneAxis axis, double coordinate)
             {
@@ -614,13 +746,28 @@ namespace FamilyAgent.Addin
 
                 var familyParameter = FindParameter(manager, parameter.Name);
                 var label = familyParameter != null &&
-                            !parameter.Instance &&
                             string.IsNullOrWhiteSpace(parameter.Formula) &&
                             labelled.Add(familyParameter.Id)
                     ? familyParameter
                     : null;
 
                 var axis = ChooseAxis(parameter.Name, value, model, coordinates);
+
+                if (label != null)
+                {
+                    skeleton.Driving.Add(parameter.Name);
+                }
+                else
+                {
+                    var reason = familyParameter == null
+                        ? "no such parameter"
+                        : parameter.Instance
+                            ? "instance parameter"
+                            : !string.IsNullOrWhiteSpace(parameter.Formula)
+                                ? "formula parameter"
+                                : "already driven";
+                    skeleton.Unlabelled.Add($"{parameter.Name} ({reason})");
+                }
 
                 if (axis == PlaneAxis.Z)
                 {
@@ -1182,7 +1329,19 @@ namespace FamilyAgent.Addin
                 var dimension = document.FamilyCreate.NewDimension(view, Line.CreateBound(start, end), references);
                 if (dimension == null) return false;
 
-                if (label != null) dimension.FamilyLabel = label;
+                if (label != null)
+                {
+                    dimension.FamilyLabel = label;
+
+                    // Revit silently refuses some dimensions: make that visible instead of
+                    // shipping a family whose parameters drive nothing.
+                    if (dimension.FamilyLabel == null)
+                    {
+                        warnings.Add($"Dimension \"{from.Name}\" → \"{to.Name}\" could not be labelled");
+                        return false;
+                    }
+                }
+
                 return true;
             }
             catch (Exception ex)

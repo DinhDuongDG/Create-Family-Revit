@@ -26,7 +26,9 @@ namespace FamilyAgent.Addin
 
         private readonly HttpListener _listener = new HttpListener();
         private readonly BuildRequestHandler _handler = new BuildRequestHandler();
+        private readonly InspectRequestHandler _inspector = new InspectRequestHandler();
         private ExternalEvent _externalEvent;
+        private ExternalEvent _inspectEvent;
         private Thread _thread;
         private volatile bool _running;
 
@@ -45,6 +47,9 @@ namespace FamilyAgent.Addin
             {
                 _externalEvent = _externalEvent ?? ExternalEvent.Create(_handler);
                 _handler.Event = _externalEvent;
+
+                _inspectEvent = _inspectEvent ?? ExternalEvent.Create(_inspector);
+                _inspector.Event = _inspectEvent;
 
                 _listener.Prefixes.Clear();
                 _listener.Prefixes.Add($"http://127.0.0.1:{port}/");
@@ -101,6 +106,23 @@ namespace FamilyAgent.Addin
 
                 if (context.Request.HttpMethod != "POST" || path != "/build")
                 {
+                    if (context.Request.HttpMethod == "POST" && path == "/inspect")
+                    {
+                        string inspectBody;
+                        using (var reader = new StreamReader(context.Request.InputStream, Encoding.UTF8))
+                        {
+                            inspectBody = reader.ReadToEnd();
+                        }
+
+                        if (!_inspector.TryQueue(inspectBody, context))
+                        {
+                            Respond(context, 409,
+                                JsonConvert.SerializeObject(new { ok = false, error = "Revit is busy with another build" }));
+                        }
+
+                        return;
+                    }
+
                     Respond(context, 404, JsonConvert.SerializeObject(new { ok = false, error = "Not found" }));
                     return;
                 }
@@ -152,6 +174,77 @@ namespace FamilyAgent.Addin
         internal static string Serialize(BuildResult result)
         {
             return JsonConvert.SerializeObject(result, JsonSettings);
+        }
+
+        private sealed class InspectRequestHandler : IExternalEventHandler
+        {
+            private readonly object _gate = new object();
+            private string _json;
+            private HttpListenerContext _context;
+            private bool _busy;
+
+            public ExternalEvent Event;
+
+            public bool TryQueue(string json, HttpListenerContext context)
+            {
+                lock (_gate)
+                {
+                    if (_busy) return false;
+                    _busy = true;
+                    _json = json;
+                    _context = context;
+                }
+
+                Event?.Raise();
+                return true;
+            }
+
+            public void Execute(UIApplication app)
+            {
+                string json;
+                HttpListenerContext context;
+
+                lock (_gate)
+                {
+                    json = _json;
+                    context = _context;
+                }
+
+                try
+                {
+                    var request = JsonConvert.DeserializeObject<InspectRequest>(json) ?? new InspectRequest();
+                    var result = FamilyBuilder.Inspect(
+                        app,
+                        request.Path,
+                        request.Parameter,
+                        request.Percent <= 0 ? 15 : request.Percent);
+
+                    Respond(context, 200, JsonConvert.SerializeObject(new { ok = true, result }, JsonSettings));
+                }
+                catch (Exception ex)
+                {
+                    Respond(context, 500,
+                        JsonConvert.SerializeObject(new { ok = false, error = ex.Message }, JsonSettings));
+                }
+                finally
+                {
+                    lock (_gate)
+                    {
+                        _busy = false;
+                        _json = null;
+                        _context = null;
+                    }
+                }
+            }
+
+            public string GetName() => "Family Agent inspect";
+
+            private sealed class InspectRequest
+            {
+                public string Path { get; set; }
+                public string Parameter { get; set; }
+                public double Percent { get; set; }
+            }
         }
 
         private sealed class BuildRequestHandler : IExternalEventHandler
