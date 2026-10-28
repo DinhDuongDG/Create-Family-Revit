@@ -16,6 +16,7 @@ Return ONE JSON object and nothing else. No markdown, no commentary, no code fen
 - `type` is one of: Length, Angle, Number, Integer, Text, YesNo. Most dimensions are Length.
 - `group`: Dimensions for sizes, Data for metadata, Mechanical / Electrical / Plumbing / Identity Data where appropriate.
 - A parameter has either `value` or `formula`, never both.
+- **Derived sizes must be formulas, never copied numbers.** If a dimension follows from another (door width, shelf depth, back panel, internal width), write the formula so changing the parent moves every dependent part: `"[Cabinet Width] - 3 * [Panel Thickness]"`. A hard-coded 399 next to a 1000 wide cabinet is a bug: widening the cabinet must widen the doors.
 - Formulas reference other parameters with square brackets: `"[Casing Length] + 2 * [Flange Width]"`.
 - Revit formulas are dimensionally checked. A bare number is a unitless scalar, so write length constants with a unit suffix: `"[Casing Height] - 140mm"`, never `"[Casing Height] - 140"`. Multiplying by a plain number is fine: `2 * [Flange Width]`.
 - Formula functions allowed: abs, sqrt, round, roundup, rounddown, sin, cos, tan, asin, acos, atan, exp, ln, log, pi(). Trigonometry uses degrees and takes Angle parameters. Do not use min, max, if, or `%` — Revit formulas do not support them.

@@ -897,6 +897,31 @@ namespace FamilyAgent.Addin
         {
             if (pending == null || pending.Count == 0) return 0;
 
+            // Fast path: the whole skeleton in one transaction. Normally nothing fails and
+            // this is several times quicker than a subtransaction per dimension.
+            var fast = new FailureCollector();
+            var fastCreated = 0;
+
+            try
+            {
+                using (var transaction = SilentTransaction(document, "Family Agent — reference dimensions", fast))
+                {
+                    transaction.Start();
+
+                    var scratch = new List<string>();
+                    foreach (var dimension in pending)
+                    {
+                        if (dimension.Create(document, scratch)) fastCreated += 1;
+                    }
+
+                    if (transaction.Commit() == TransactionStatus.Committed) return fastCreated;
+                }
+            }
+            catch
+            {
+                // Fall through to the one-by-one path below.
+            }
+
             var failures = new FailureCollector();
             var created = 0;
 

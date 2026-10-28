@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   analyzeSpec,
   paramKey,
@@ -109,7 +109,7 @@ export function App() {
   const [attachments, setAttachments] = useState<UploadedDocument[]>([]);
   const [uploading, setUploading] = useState(false);
   const [showGrid, setShowGrid] = useState(true);
-  const [showPlanes, setShowPlanes] = useState(false);
+  const [showPlanes, setShowPlanes] = useState(true);
   const [showConnectors, setShowConnectors] = useState(false);
   const [showHandles, setShowHandles] = useState(false);
   const [selectedPartId, setSelectedPartId] = useState<string | null>(null);
@@ -180,6 +180,10 @@ export function App() {
   };
 
   const analysis = useMemo(() => (spec ? analyzeSpec(spec) : null), [spec]);
+
+  // Typing in a parameter field re-solves the geometry; defer it so the input stays smooth.
+  const deferredModel = useDeferredValue(analysis?.model ?? null);
+  const deferredParameters = useDeferredValue(spec?.parameters);
 
   useEffect(() => {
     let alive = true;
@@ -818,8 +822,8 @@ export function App() {
         />
 
         <Viewer
-          model={analysis?.model ?? null}
-          parameters={spec?.parameters}
+          model={deferredModel}
+          parameters={deferredParameters}
           materials={spec?.materials ?? []}
           units={units}
           showGrid={showGrid}
