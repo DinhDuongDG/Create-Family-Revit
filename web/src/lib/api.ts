@@ -87,6 +87,11 @@ export interface UploadedDocument {
   name: string;
   size: number;
   path: string;
+  url?: string;
+}
+
+export function isImageDocument(doc: UploadedDocument): boolean {
+  return /\.(png|jpe?g|webp|gif|bmp)$/i.test(doc.name);
 }
 
 export async function uploadDocument(file: File): Promise<UploadedDocument> {
@@ -110,6 +115,12 @@ export async function uploadDocument(file: File): Promise<UploadedDocument> {
   return payload as UploadedDocument;
 }
 
+export interface CustomApiConfig {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+}
+
 export type Lod = 200 | 300 | 350 | 400;
 
 export async function streamDesign(
@@ -118,6 +129,7 @@ export async function streamDesign(
     spec: FamilySpec | null;
     lod?: Lod;
     model?: string;
+    customApiConfig?: CustomApiConfig;
     attachments?: { path: string; name: string }[];
   },
   onEvent: (event: DesignEvent) => void,
