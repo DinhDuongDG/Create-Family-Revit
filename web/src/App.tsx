@@ -16,6 +16,7 @@ import { TopBar } from "./components/TopBar";
 import { Viewer } from "./components/Viewer";
 import {
   buildFamily,
+  downloadPortablePackage,
   fetchHealth,
   pingServer,
   streamDesign,
@@ -102,6 +103,7 @@ export function App() {
   const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [building, setBuilding] = useState(false);
+  const [exportingPortable, setExportingPortable] = useState(false);
   const [native, setNative] = useState(false);
   const [units, setUnits] = useState<Units>("mm");
   const [revitVersion, setRevitVersion] = useState("2024");
@@ -453,6 +455,33 @@ export function App() {
       return { ...current, parameters: [...current.parameters, parameter] };
     });
     setNative(false);
+  };
+
+  const handleExportPortable = async () => {
+    if (!spec || !analysis?.ok || exportingPortable) return;
+    setExportingPortable(true);
+    setToast({
+      text: "Đang tạo gói 1-Click RFA Portable...",
+      sub: "Đang đóng gói file spec, runner và kịch bản tự động dựng Native Family cho Revit...",
+      tone: "ok",
+    });
+
+    try {
+      await downloadPortablePackage({ ...spec, revitVersion });
+      setToast({
+        text: "Tải gói 1-Click RFA thành công!",
+        sub: "Giải nén file zip và click đúp '1-Click-Build.bat' trên máy có Revit để sinh file .rfa.",
+        tone: "ok",
+      });
+    } catch (err: any) {
+      setToast({
+        text: "Không thể tạo gói Portable",
+        sub: err?.message || String(err),
+        tone: "error",
+      });
+    } finally {
+      setExportingPortable(false);
+    }
   };
 
   const handleBuild = async () => {
@@ -828,6 +857,8 @@ export function App() {
         lod={lod}
         onLod={handleLod}
         onBuild={handleBuild}
+        onExportPortable={handleExportPortable}
+        exportingPortable={exportingPortable}
         canBuild={Boolean(analysis?.ok)}
         building={building}
         onSaveModel={handleSaveModel}

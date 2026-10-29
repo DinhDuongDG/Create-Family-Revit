@@ -7,6 +7,7 @@ import { design } from "./designer.js";
 import { buildFamily } from "./bridge.js";
 import { agentStatus, getCmdcModels } from "./agents.js";
 import { bridgeAlive, ensureBridge, findRevitExe } from "./revit.js";
+import { createPortablePackage } from "./portable.js";
 
 const app = express();
 app.use(express.json({ limit: "30mb" }));
@@ -255,6 +256,24 @@ app.post("/api/build", async (req, res) => {
     res.json(result);
   } catch (error) {
     res.status(500).json({ ok: false, error: error?.message || String(error) });
+  }
+});
+
+app.post("/api/export-portable", async (req, res) => {
+  const analysis = analyzeSpec(req.body?.spec);
+  if (!analysis.ok) {
+    res.status(400).json({ ok: false, error: "Spec contains errors", issues: analysis.errors });
+    return;
+  }
+
+  try {
+    const pkg = await createPortablePackage(analysis.spec);
+    res.download(pkg.zipPath, pkg.fileName, (err) => {
+      pkg.cleanup();
+    });
+  } catch (err) {
+    console.error("Portable package creation error:", err);
+    res.status(500).json({ ok: false, error: err.message || "Failed to generate portable package" });
   }
 });
 
