@@ -169,12 +169,20 @@ foreach ($regKey in $codeSigningKeys) {
     Remove-ItemProperty -Path $regKey -Name $addInGuid -ErrorAction SilentlyContinue
 }
 
-# 5. Tu dong don dep cac file giai nen (chi giu lai file .rfa va file .zip goc)
+# 5. Cho Revit dong han roi don dep triet de cac file giai nen
 if ($rfaFound) {
     Write-Host ""
-    Write-Host "[DANG DON DEP]: Dang don dep cac file giai nen (.dll, .bat, .json, runner)..." -ForegroundColor Cyan
+    Write-Host "[DANG DON DEP]: Dang cho Revit dong de xoa sach cac file trung gian..." -ForegroundColor Cyan
 
-    # Don dep truc tiep cac file cua goi cong cu sau khi nguoi dung nhan Enter thoat
+    # Cho toi khi tien trinh Revit tat han (toi da 20 giay) de mo khoa file DLL
+    for ($k = 0; $k -lt 20; $k++) {
+        $rvtProc = Get-Process -Name "Revit" -ErrorAction SilentlyContinue
+        if (-not $rvtProc) { break }
+        Start-Sleep -Seconds 1
+    }
+    Start-Sleep -Seconds 2
+
+    # Danh sach cac file thuoc goi Portable can don dep
     $filesToClean = @(
         "FamilyAgent.Addin.dll",
         "FamilyAgent.Core.dll",
@@ -190,7 +198,12 @@ if ($rfaFound) {
     foreach ($file in $filesToClean) {
         $target = Join-Path $currentDir $file
         if (Test-Path $target) {
-            Remove-Item $target -Force -ErrorAction SilentlyContinue
+            # Thu xoa lap lai neu file vua duoc nha khoa
+            for ($attempt = 0; $attempt -lt 5; $attempt++) {
+                Remove-Item $target -Force -ErrorAction SilentlyContinue
+                if (-not (Test-Path $target)) { break }
+                Start-Sleep -Milliseconds 500
+            }
         }
     }
 
