@@ -130,7 +130,7 @@ Write-Host "Ban khong can thao tac gi them, he thong se TU DONG dung truc tiep f
 Write-Host "---------------------------------------------------------------------" -ForegroundColor Gray
 Write-Host ""
 
-Start-Process $revitExe
+$revitProcess = Start-Process $revitExe -PassThru
 
 Write-Host "Dang theo doi va cho file .rfa xuat hien tai thu muc nay..." -ForegroundColor Cyan
 
@@ -169,16 +169,16 @@ foreach ($regKey in $codeSigningKeys) {
     Remove-ItemProperty -Path $regKey -Name $addInGuid -ErrorAction SilentlyContinue
 }
 
-# 5. Cho Revit dong han roi don dep triet de cac file giai nen
+# 5. Cho session Revit nay dong han roi don dep triet de cac file giai nen
 if ($rfaFound) {
     Write-Host ""
-    Write-Host "[DANG DON DEP]: Dang cho Revit dong de xoa sach cac file trung gian..." -ForegroundColor Cyan
+    Write-Host "[DANG DON DEP]: Dang cho phien Revit dung hinh dong de don dep file trung gian..." -ForegroundColor Cyan
 
-    # Cho toi khi tien trinh Revit tat han (toi da 20 giay) de mo khoa file DLL
-    for ($k = 0; $k -lt 20; $k++) {
-        $rvtProc = Get-Process -Name "Revit" -ErrorAction SilentlyContinue
-        if (-not $rvtProc) { break }
-        Start-Sleep -Seconds 1
+    # Chi theo doi dung phien Revit vua khoi tao de tranh anh huong neu ban dang mo Revit khac lam viec
+    if ($revitProcess) {
+        try {
+            $revitProcess.WaitForExit(25000)
+        } catch { }
     }
     Start-Sleep -Seconds 2
 
@@ -187,7 +187,7 @@ if ($rfaFound) {
         "FamilyAgent.Addin.dll",
         "FamilyAgent.Core.dll",
         "Newtonsoft.Json.dll",
-        "$specName-spec.json",
+        "${specName}-spec.json",
         "build_result.txt",
         "build_error.log",
         "build_crash.log",
