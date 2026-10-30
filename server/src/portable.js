@@ -101,8 +101,8 @@ $manifestContent = @"
 <RevitAddIns>
   <AddIn Type="Application">
     <Name>Family Agent Portable Auto Builder</Name>
-    <Assembly>`$assemblyPath</Assembly>
-    <AddInId>`$addInGuid</AddInId>
+    <Assembly>$assemblyPath</Assembly>
+    <AddInId>$addInGuid</AddInId>
     <FullClassName>FamilyAgent.Addin.PortableAutoApp</FullClassName>
     <VendorId>FAMLYAGT</VendorId>
   </AddIn>
