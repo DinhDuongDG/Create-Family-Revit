@@ -72,15 +72,33 @@ if (-not $revitExe) {
 
 Write-Host "[OK] Phat hien Revit: $revitExe (Phien ban: $revitVer)" -ForegroundColor Yellow
 
-# 2. Tao manifest Application tu dong trong %APPDATA%
+# 2. Tao thu muc Shadow Copy rieng biet trong %TEMP%
+# Dieu nay giup file DLL trong thu muc hien tai (Downloads) KHONG BAO GIO bi Revit khoa,
+# ke ca khi nguoi dung dang mo san mot phien lam viec Revit khac!
 $currentDir = $PSScriptRoot
+$shadowId = [System.Guid]::NewGuid().ToString("N").Substring(0, 8)
+$shadowDir = [System.IO.Path]::Combine($env:TEMP, "FA-Shadow-" + $shadowId)
+if (-not (Test-Path $shadowDir)) {
+    New-Item -ItemType Directory -Path $shadowDir -Force | Out-Null
+}
+
+# Sao chep cac file DLL can thiet sang thu muc shadow trong %TEMP%
+$runnerDlls = @("FamilyAgent.Addin.dll", "FamilyAgent.Core.dll", "Newtonsoft.Json.dll")
+foreach ($dll in $runnerDlls) {
+    $src = [System.IO.Path]::Combine($currentDir, $dll)
+    if (Test-Path $src) {
+        Copy-Item -Path $src -Destination (Join-Path $shadowDir $dll) -Force -ErrorAction SilentlyContinue
+    }
+}
+
 $addinDir = [System.IO.Path]::Combine($env:APPDATA, "Autodesk", "Revit", "Addins", $revitVer)
 if (-not (Test-Path $addinDir)) {
     New-Item -ItemType Directory -Path $addinDir -Force | Out-Null
 }
 
 $manifestFile = [System.IO.Path]::Combine($addinDir, "FamilyAgent_Portable_Temp.addin")
-$assemblyPath = [System.IO.Path]::Combine($currentDir, "FamilyAgent.Addin.dll")
+# Assembly tro den ban copy trong %TEMP%, hoan toan giai phong thu muc Downloads
+$assemblyPath = [System.IO.Path]::Combine($shadowDir, "FamilyAgent.Addin.dll")
 $addInGuid = "9b1f4a8e-2c11-4f5a-9a0e-6f1f4d1c2c99"
 
 # Tu dong dang ky AddInId vao CodeSigning Registry de Revit bo qua hop thoai Security Unsigned Add-In (Always Load)
@@ -169,18 +187,11 @@ foreach ($regKey in $codeSigningKeys) {
     Remove-ItemProperty -Path $regKey -Name $addInGuid -ErrorAction SilentlyContinue
 }
 
-# 5. Cho session Revit nay dong han roi don dep triet de cac file giai nen
+# 5. Don dep triet de cac file trung gian
+# Vi DLL duoc shadow copy sang %TEMP% nen cac file tai $currentDir khong bi Revit khoa
 if ($rfaFound) {
     Write-Host ""
-    Write-Host "[DANG DON DEP]: Dang cho phien Revit dung hinh dong de don dep file trung gian..." -ForegroundColor Cyan
-
-    # Chi theo doi dung phien Revit vua khoi tao de tranh anh huong neu ban dang mo Revit khac lam viec
-    if ($revitProcess) {
-        try {
-            $revitProcess.WaitForExit(25000)
-        } catch { }
-    }
-    Start-Sleep -Seconds 2
+    Write-Host "[DANG DON DEP]: Dang don dep file trung gian..." -ForegroundColor Cyan
 
     # Danh sach cac file thuoc goi Portable can don dep
     $filesToClean = @(
@@ -198,13 +209,17 @@ if ($rfaFound) {
     foreach ($file in $filesToClean) {
         $target = Join-Path $currentDir $file
         if (Test-Path $target) {
-            # Thu xoa lap lai neu file vua duoc nha khoa
-            for ($attempt = 0; $attempt -lt 5; $attempt++) {
+            for ($attempt = 0; $attempt -lt 3; $attempt++) {
                 Remove-Item $target -Force -ErrorAction SilentlyContinue
                 if (-not (Test-Path $target)) { break }
-                Start-Sleep -Milliseconds 500
+                Start-Sleep -Milliseconds 300
             }
         }
+    }
+
+    # Don dep thu muc shadow trong %TEMP% (neu chua co tien trinh nao khoa)
+    if (Test-Path $shadowDir) {
+        Remove-Item -Path $shadowDir -Recurse -Force -ErrorAction SilentlyContinue
     }
 
     # Tu dong xoa file .bat sau 1 giay bang tien trinh CMD ngam
