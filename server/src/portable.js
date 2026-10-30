@@ -174,8 +174,22 @@ if ($rfaFound) {
     Write-Host ""
     Write-Host "[DANG DON DEP]: Dang don dep cac file giai nen (.dll, .bat, .json, runner)..." -ForegroundColor Cyan
 
-    # Kich hoat PowerShell ngam don dep tat ca file phu ngoai tru file .rfa va .zip
-    $cleanCmd = "Start-Sleep -Seconds 3; Get-ChildItem -LiteralPath '$currentDir' -Exclude '*.rfa', '*.zip' | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue"
+    # Chi xoa dung danh sach cac file cua goi cong cu, TUYET DOI khong dung wildcard xoa cac file khac trong thu muc
+    $filesToClean = @(
+        "FamilyAgent.Addin.dll",
+        "FamilyAgent.Core.dll",
+        "Newtonsoft.Json.dll",
+        "$specName-spec.json",
+        "build_result.txt",
+        "build_error.log",
+        "build_crash.log",
+        "HUONG_DAN.txt",
+        "runner.ps1",
+        "1-Click-Build.bat"
+    )
+
+    $itemsList = ($filesToClean | ForEach-Object { "'$_'" }) -join ","
+    $cleanCmd = "Start-Sleep -Seconds 3; foreach (\$f in @(" + $itemsList + ")) { \$target = Join-Path '$currentDir' \$f; if (Test-Path \$target) { Remove-Item \$target -Force -ErrorAction SilentlyContinue } }"
     Start-Process powershell.exe -ArgumentList @("-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-Command", $cleanCmd)
 
     Write-Host "[HOAN TAT]: Da don dep sach se! Thu muc chi giu lai file .rfa va file .zip cua ban." -ForegroundColor Green
