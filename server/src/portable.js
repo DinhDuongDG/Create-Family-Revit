@@ -85,8 +85,8 @@ $addInGuid = "9b1f4a8e-2c11-4f5a-9a0e-6f1f4d1c2c99"
 
 # Tu dong dang ky AddInId vao CodeSigning Registry de Revit bo qua hop thoai Security Unsigned Add-In (Always Load)
 $codeSigningKeys = @(
-    "HKCU:\Software\Autodesk\Revit\Autodesk Revit $revitVer\CodeSigning",
-    "HKCU:\Software\Autodesk\Revit\$revitVer\CodeSigning"
+    "HKCU:\\Software\\Autodesk\\Revit\\Autodesk Revit " + $revitVer + "\\CodeSigning",
+    "HKCU:\\Software\\Autodesk\\Revit\\" + $revitVer + "\\CodeSigning"
 )
 foreach ($regKey in $codeSigningKeys) {
     if (-not (Test-Path $regKey)) {
