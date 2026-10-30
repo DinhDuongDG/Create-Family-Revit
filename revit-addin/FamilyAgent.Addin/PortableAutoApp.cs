@@ -1,0 +1,105 @@
+using System;
+using System.IO;
+using System.Linq;
+using Autodesk.Revit.UI;
+using Autodesk.Revit.UI.Events;
+
+namespace FamilyAgent.Addin
+{
+    /// <summary>
+    /// Application chạy tự động khi Revit khởi động.
+    /// Tự động dò tìm file spec.json trong thư mục Portable, dựng Native Family,
+    /// MOVE file .rfa về thư mục Portable và tự động đóng Revit (Zero-click).
+    /// </summary>
+    public sealed class PortableAutoApp : IExternalApplication
+    {
+        private static UIControlledApplication _app;
+
+        public Result OnStartup(UIControlledApplication application)
+        {
+            _app = application;
+            // Đăng ký sự kiện Idling: ngay khi Revit khởi động và sẵn sàng, tự động thực thi build
+            application.Idling += OnRevitIdling;
+            return Result.Succeeded;
+        }
+
+        public Result OnShutdown(UIControlledApplication application)
+        {
+            application.Idling -= OnRevitIdling;
+            return Result.Succeeded;
+        }
+
+        private static void OnRevitIdling(object sender, IdlingEventArgs e)
+        {
+            // Chỉ chạy duy nhất 1 lần khi Revit vừa mở xong
+            _app.Idling -= OnRevitIdling;
+
+            var uiApp = sender as UIApplication;
+            if (uiApp == null) return;
+
+            var addinDir = Path.GetDirectoryName(typeof(PortableAutoApp).Assembly.Location) ?? AppDomain.CurrentDomain.BaseDirectory;
+
+            // Tìm file spec.json trong cùng thư mục Portable
+            var specFile = Directory.GetFiles(addinDir, "*spec*.json")
+                .Concat(Directory.GetFiles(addinDir, "*.json"))
+                .FirstOrDefault();
+
+            if (specFile == null || !File.Exists(specFile))
+            {
+                var errorLog = Path.Combine(addinDir, "build_error.log");
+                File.WriteAllText(errorLog, "Không tìm thấy file spec.json trong thư mục: " + addinDir);
+                return;
+            }
+
+            try
+            {
+                var json = File.ReadAllText(specFile);
+                var result = FamilyBuilder.Build(uiApp.Application, json);
+
+                var logPath = Path.Combine(addinDir, "build_result.txt");
+                if (result.Ok)
+                {
+                    // MOVE (Di chuyển) file .rfa kết quả về ngay thư mục Portable của người dùng
+                    var destination = Path.Combine(addinDir, Path.GetFileName(result.Path));
+                    if (File.Exists(result.Path))
+                    {
+                        if (File.Exists(destination))
+                        {
+                            try { File.Delete(destination); } catch { }
+                        }
+                        File.Move(result.Path, destination);
+                    }
+
+                    File.WriteAllText(logPath, $"SUCCESS\nPath: {destination}\nRevitVersion: {result.RevitVersion}");
+                }
+                else
+                {
+                    File.WriteAllText(logPath, $"FAILED\nError: {result.Error}\nWarnings:\n" + string.Join("\n", result.Warnings));
+                }
+            }
+            catch (Exception ex)
+            {
+                var logPath = Path.Combine(addinDir, "build_crash.log");
+                File.WriteAllText(logPath, ex.ToString());
+            }
+            finally
+            {
+                // Sau khi dựng xong, nếu cờ AUTO_EXIT được bật (chạy từ .bat), tự động đóng Revit
+                var autoExit = Environment.GetEnvironmentVariable("FAMILY_AGENT_AUTO_EXIT");
+                if (string.Equals(autoExit, "1", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Đóng Revit an toàn
+                    try
+                    {
+                        var exitCommandId = RevitCommandId.LookupPostableCommandId(PostableCommand.ExitRevit);
+                        if (exitCommandId != null && uiApp.CanPostCommand(exitCommandId))
+                        {
+                            uiApp.PostCommand(exitCommandId);
+                        }
+                    }
+                    catch { }
+                }
+            }
+        }
+    }
+}

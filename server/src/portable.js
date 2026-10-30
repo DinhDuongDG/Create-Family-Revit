@@ -31,14 +31,15 @@ function zipFolder(sourceFolder, zipFilePath) {
 }
 
 /**
- * Tạo kịch bản PowerShell chạy Portable an toàn, không bị lỗi bảng mã tiếng Việt
+ * Tạo kịch bản PowerShell chạy Portable tự động 100% (Zero-click):
+ * Khởi động Revit, tự động dựng hình, MOVE file .rfa ra ngoài và tự đóng Revit.
  */
 function generatePs1Script(specName) {
-  return `# PowerShell Portable Builder Script
+  return `# PowerShell Portable Builder Script (Auto-Build 100%)
 $ErrorActionPreference = "Continue"
 
 Write-Host "=====================================================================" -ForegroundColor Cyan
-Write-Host "  DANG KHOI DONG RUNNER DUNG NATIVE FAMILY CHO REVIT (PORTABLE)" -ForegroundColor Green
+Write-Host "  DANG KHOI DONG RUNNER DUNG NATIVE FAMILY CHO REVIT (TU DONG 100%)" -ForegroundColor Green
 Write-Host "=====================================================================" -ForegroundColor Cyan
 
 # 1. Tim kiem Revit.exe
@@ -71,7 +72,7 @@ if (-not $revitExe) {
 
 Write-Host "[OK] Phat hien Revit: $revitExe (Phien ban: $revitVer)" -ForegroundColor Yellow
 
-# 2. Tao manifest tam thoi trong %APPDATA%
+# 2. Tao manifest Application tu dong trong %APPDATA%
 $currentDir = $PSScriptRoot
 $addinDir = Join-Path $env:APPDATA "Autodesk\\Revit\\Addins\\$revitVer"
 if (-not (Test-Path $addinDir)) {
@@ -81,50 +82,51 @@ if (-not (Test-Path $addinDir)) {
 $manifestFile = Join-Path $addinDir "FamilyAgent_Portable_Temp.addin"
 $assemblyPath = Join-Path $currentDir "FamilyAgent.Addin.dll"
 
+# Manifest dang Application tu dong thuc thi khi khoi dong
 $manifestContent = @"
 <?xml version="1.0" encoding="utf-8"?>
 <RevitAddIns>
-  <AddIn Type="Command">
-    <Name>Family Agent Portable</Name>
+  <AddIn Type="Application">
+    <Name>Family Agent Portable Auto Builder</Name>
     <Assembly>$assemblyPath</Assembly>
-    <AddInId>7a0e384e-2c11-4f5a-9a0e-6f1f4d1c2b88</AddInId>
-    <FullClassName>FamilyAgent.Addin.PortableBuildCommand</FullClassName>
-    <Text>Build $specName</Text>
-    <Description>Auto-build native parametric family</Description>
-    <VisibilityMode>AlwaysVisible</VisibilityMode>
+    <AddInId>9b1f4a8e-2c11-4f5a-9a0e-6f1f4d1c2c99</AddInId>
+    <FullClassName>FamilyAgent.Addin.PortableAutoApp</FullClassName>
     <VendorId>FAMLYAGT</VendorId>
   </AddIn>
 </RevitAddIns>
 "@
 
 [System.IO.File]::WriteAllText($manifestFile, $manifestContent, (New-Object System.Text.UTF8Encoding($false)))
-Write-Host "[OK] Da nap runner tam thoi vao Revit Addins ($revitVer)." -ForegroundColor Cyan
+Write-Host "[OK] Da nap runner tu dong vao Revit." -ForegroundColor Cyan
 
-# 3. Kiem tra xem Revit co dang chay khong
+# Dat co de PortableAutoApp tu dong dong Revit sau khi dung xong
+[System.Environment]::SetEnvironmentVariable("FAMILY_AGENT_AUTO_EXIT", "1", "Process")
+
+# 3. Kiem tra va khoi chay Revit tu dong
 $isRunning = Get-Process -Name "Revit" -ErrorAction SilentlyContinue
 
 Write-Host ""
 Write-Host "---------------------------------------------------------------------" -ForegroundColor Gray
 if ($isRunning) {
-    Write-Host "[THONG BAO]: Revit dang chay tren may cua ban!" -ForegroundColor Green
-    Write-Host "-> Hay chuyen sang cua so Revit -> Tab [Add-Ins] -> [External Tools] -> bam chon [Build $specName]" -ForegroundColor Yellow
-    Write-Host "   (File .rfa se tu dong sinh ra ngay tai thu muc nay)" -ForegroundColor White
+    Write-Host "[THONG BAO]: Revit dang chay tren may. Dang khoi dong them session dung hinh..." -ForegroundColor Yellow
 } else {
-    Write-Host "[THONG BAO]: Revit chua chay. Bat dau khoi dong Revit tu dong de dung hinh..." -ForegroundColor Cyan
-    Start-Process $revitExe
-    Write-Host "-> Khi Revit mo len, vao Tab [Add-Ins] -> [External Tools] -> bam [Build $specName]" -ForegroundColor Yellow
+    Write-Host "[THONG BAO]: Dang khoi dong Revit de tu dong dung Native Family..." -ForegroundColor Green
 }
+Write-Host "Ban khong can thao tac gi them, he thong se TU DONG dung va MOVE file .rfa ve day!" -ForegroundColor Cyan
 Write-Host "---------------------------------------------------------------------" -ForegroundColor Gray
 Write-Host ""
 
-Write-Host "Dang theo doi tien trinh tao file .rfa (Dung nguyen ban tung khoi Solid)..." -ForegroundColor Cyan
+Start-Process $revitExe
+
+Write-Host "Dang theo doi va cho file .rfa xuat hien tai thu muc nay..." -ForegroundColor Cyan
 
 $rfaFound = $false
-for ($i = 0; $i -lt 120; $i++) {
+for ($i = 0; $i -lt 180; $i++) {
     Start-Sleep -Seconds 2
     $rfaFiles = Get-ChildItem -Path $currentDir -Filter "*.rfa"
     if ($rfaFiles.Count -gt 0) {
         $rfaFound = $true
+        $targetRfa = $rfaFiles[0].FullName
         break
     }
 }
@@ -132,20 +134,24 @@ for ($i = 0; $i -lt 120; $i++) {
 Write-Host ""
 if ($rfaFound) {
     Write-Host "=====================================================================" -ForegroundColor Green
-    Write-Host "  THANH CONG! DA TAO XONG FILE .RFA TAI THU MUC NAY!" -ForegroundColor Green
-    Write-Host "  Family la Native Solid 100% va co day du tham so bien thien." -ForegroundColor Green
+    Write-Host "  THANH CONG! DA MOVE FILE .RFA VE NGAY THU MUC CUA BAN:" -ForegroundColor Green
+    Write-Host "  -> $targetRfa" -ForegroundColor Yellow
+    Write-Host "  File la Native Family 100% (Day du khoi Solid va tham so bien thien)!" -ForegroundColor Green
     Write-Host "=====================================================================" -ForegroundColor Green
+
+    # Tu dong mo thu muc va highlight file .rfa cho nguoi dung
+    explorer.exe /select,"$targetRfa"
 } else {
-    Write-Host "Tien trinh ket thuc hoac chua phat hien file .rfa moi." -ForegroundColor Yellow
+    Write-Host "Tien trinh cho qua thoi gian hoac chua hoan tat. Vui long kiem tra file build_error.log." -ForegroundColor Yellow
 }
 
-# 4. Don dep manifest tam thoi
+# 4. Don dep manifest tam thoi sach se
 if (Test-Path $manifestFile) {
     Remove-Item $manifestFile -Force -ErrorAction SilentlyContinue
-    Write-Host "[OK] Da don dep sach se moi truong portable, khong luu add-in tren he thong." -ForegroundColor Gray
+    Write-Host "[OK] Da don dep sach se runner tam thoi, khong luu add-in tren may." -ForegroundColor Gray
 }
 
-Read-Host "Nhan Enter de dong cua so nay..."
+Read-Host "Nhan Enter de thoat..."
 `;
 }
 
@@ -186,11 +192,11 @@ export async function createPortablePackage(spec) {
   fs.writeFileSync(path.join(packageDir, "1-Click-Build.bat"), batContent, "ascii");
 
   // 5. Tạo file HDSD ngắn gọn
-  const readmeContent = `HUONG DAN DUNG FILE .RFA NATIVE (KHONG CAN CAI ADD-IN):
-1. Click dup vao file "1-Click-Build.bat".
-2. Chuyen sang cua so Revit -> Tab [Add-Ins] -> [External Tools] -> Chon "Build ${spec.name || "Family"}".
-3. Revit se tu dong tao moi Family va dung tung khoi Solid, gan tham so va luu file .rfa ngay tai thu muc nay.
-4. Xong xuoi ban co the xoa thu muc nay, may tinh van sach se hoan toan.
+  const readmeContent = `HUONG DAN DUNG FILE .RFA NATIVE TU DONG 100%:
+1. Chi can click dup chuot vao file "1-Click-Build.bat".
+2. Revit se tu dong khoi dong ngam, tu dong tao Family, dung tung khoi Solid va gan tham so.
+3. File .rfa se duoc TU DONG MOVE ve ngay thu muc nay.
+4. Cua so thu muc se tu dong mo len cho ban lay file!
 `;
   fs.writeFileSync(path.join(packageDir, "HUONG_DAN.txt"), readmeContent, "utf8");
 
