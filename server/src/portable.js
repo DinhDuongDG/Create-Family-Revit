@@ -178,9 +178,6 @@ if ($rfaFound) {
     Write-Host "  -> $targetRfa" -ForegroundColor Yellow
     Write-Host "  File la Native Family 100% (Day du khoi Solid va tham so bien thien)!" -ForegroundColor Green
     Write-Host "=====================================================================" -ForegroundColor Green
-
-    # Tu dong mo thu muc va highlight file .rfa cho nguoi dung
-    explorer.exe /select,"$targetRfa"
 } else {
     Write-Host "Tien trinh cho qua thoi gian hoac chua hoan tat. Vui long kiem tra file build_error.log." -ForegroundColor Yellow
 }
