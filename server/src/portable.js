@@ -158,15 +158,39 @@ if ($rfaFound) {
     Write-Host "Tien trinh cho qua thoi gian hoac chua hoan tat. Vui long kiem tra file build_error.log." -ForegroundColor Yellow
 }
 
-# 4. Don dep manifest tam thoi sach se
+# 4. Don dep manifest tam thoi va registry sach se
 if (Test-Path $manifestFile) {
     Remove-Item $manifestFile -Force -ErrorAction SilentlyContinue
-    Write-Host "[OK] Da don dep sach se runner tam thoi, khong luu add-in tren may." -ForegroundColor Gray
+    Write-Host "[OK] Da don dep sach se runner tam thoi trong Revit." -ForegroundColor Gray
 }
 
-# Xoa khoa CodeSigning de tra lai nguyen trang may nguoi dung
 foreach ($regKey in $codeSigningKeys) {
     Remove-ItemProperty -Path $regKey -Name $addInGuid -ErrorAction SilentlyContinue
+}
+
+# 5. Tu dong don dep cac file phu tro (chi giu lai duy nhat file .rfa thanh pham)
+if ($rfaFound) {
+    Write-Host ""
+    Write-Host "[DANG DON DEP]: Tu dong xoa cac file trung gian (.dll, .bat, .json, .zip)..." -ForegroundColor Cyan
+
+    # Tao script batch ngam de tu xoa toan bo file phu sau khi tien trinh ket thuc
+    $cleanScript = Join-Path $env:TEMP ("cleanup-" + [System.Guid]::NewGuid().ToString() + ".bat")
+    $cleanBatchContent = @"
+@echo off
+timeout /t 2 /nobreak >nul
+del /f /q "$currentDir\\*.dll" 2>nul
+del /f /q "$currentDir\\*.json" 2>nul
+del /f /q "$currentDir\\build_result.txt" 2>nul
+del /f /q "$currentDir\\build_error.log" 2>nul
+del /f /q "$currentDir\\HUONG_DAN.txt" 2>nul
+del /f /q "$currentDir\\runner.ps1" 2>nul
+del /f /q "$currentDir\\1-Click-Build.bat" 2>nul
+del /f /q "$currentDir\\*Portable*.zip" 2>nul
+del "%~f0" 2>nul
+"@
+    [System.IO.File]::WriteAllText($cleanScript, $cleanBatchContent, [System.Text.Encoding]::ASCII)
+    Start-Process $cleanScript -WindowStyle Hidden
+    Write-Host "[HOAN TAT]: Thu muc chi con lai duy nhat file .rfa cua ban!" -ForegroundColor Green
 }
 
 Read-Host "Nhan Enter de thoat..."
