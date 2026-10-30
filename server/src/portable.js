@@ -74,13 +74,26 @@ Write-Host "[OK] Phat hien Revit: $revitExe (Phien ban: $revitVer)" -ForegroundC
 
 # 2. Tao manifest Application tu dong trong %APPDATA%
 $currentDir = $PSScriptRoot
-$addinDir = Join-Path $env:APPDATA "Autodesk\\Revit\\Addins\\$revitVer"
+$addinDir = Join-Path $env:APPDATA "Autodesk\Revit\Addins\$revitVer"
 if (-not (Test-Path $addinDir)) {
     New-Item -ItemType Directory -Path $addinDir -Force | Out-Null
 }
 
 $manifestFile = Join-Path $addinDir "FamilyAgent_Portable_Temp.addin"
 $assemblyPath = Join-Path $currentDir "FamilyAgent.Addin.dll"
+$addInGuid = "9b1f4a8e-2c11-4f5a-9a0e-6f1f4d1c2c99"
+
+# Tu dong dang ky AddInId vao CodeSigning Registry de Revit bo qua hop thoai Security Unsigned Add-In (Always Load)
+$codeSigningKeys = @(
+    "HKCU:\Software\Autodesk\Revit\Autodesk Revit $revitVer\CodeSigning",
+    "HKCU:\Software\Autodesk\Revit\$revitVer\CodeSigning"
+)
+foreach ($regKey in $codeSigningKeys) {
+    if (-not (Test-Path $regKey)) {
+        New-Item -Path $regKey -Force | Out-Null
+    }
+    Set-ItemProperty -Path $regKey -Name $addInGuid -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue
+}
 
 # Manifest dang Application tu dong thuc thi khi khoi dong
 $manifestContent = @"
@@ -88,8 +101,8 @@ $manifestContent = @"
 <RevitAddIns>
   <AddIn Type="Application">
     <Name>Family Agent Portable Auto Builder</Name>
-    <Assembly>$assemblyPath</Assembly>
-    <AddInId>9b1f4a8e-2c11-4f5a-9a0e-6f1f4d1c2c99</AddInId>
+    <Assembly>`$assemblyPath</Assembly>
+    <AddInId>`$addInGuid</AddInId>
     <FullClassName>FamilyAgent.Addin.PortableAutoApp</FullClassName>
     <VendorId>FAMLYAGT</VendorId>
   </AddIn>
@@ -97,7 +110,7 @@ $manifestContent = @"
 "@
 
 [System.IO.File]::WriteAllText($manifestFile, $manifestContent, (New-Object System.Text.UTF8Encoding($false)))
-Write-Host "[OK] Da nap runner tu dong vao Revit." -ForegroundColor Cyan
+Write-Host "[OK] Da nap runner tu dong vao Revit (va bo qua hop thoai Security)." -ForegroundColor Cyan
 
 # Dat co de PortableAutoApp tu dong dong Revit sau khi dung xong
 [System.Environment]::SetEnvironmentVariable("FAMILY_AGENT_AUTO_EXIT", "1", "Process")
@@ -149,6 +162,11 @@ if ($rfaFound) {
 if (Test-Path $manifestFile) {
     Remove-Item $manifestFile -Force -ErrorAction SilentlyContinue
     Write-Host "[OK] Da don dep sach se runner tam thoi, khong luu add-in tren may." -ForegroundColor Gray
+}
+
+# Xoa khoa CodeSigning de tra lai nguyen trang may nguoi dung
+foreach ($regKey in $codeSigningKeys) {
+    Remove-ItemProperty -Path $regKey -Name $addInGuid -ErrorAction SilentlyContinue
 }
 
 Read-Host "Nhan Enter de thoat..."
