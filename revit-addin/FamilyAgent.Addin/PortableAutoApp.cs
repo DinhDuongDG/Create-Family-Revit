@@ -53,24 +53,17 @@ namespace FamilyAgent.Addin
 
             try
             {
+                // Cấu hình thư mục lưu file .rfa trực tiếp tại thư mục Portable của người dùng
+                Environment.SetEnvironmentVariable("FAMILY_AGENT_OUT", addinDir);
+
                 var json = File.ReadAllText(specFile);
                 var result = FamilyBuilder.Build(uiApp.Application, json);
 
                 var logPath = Path.Combine(addinDir, "build_result.txt");
                 if (result.Ok)
                 {
-                    // MOVE (Di chuyển) file .rfa kết quả về ngay thư mục Portable của người dùng
-                    var destination = Path.Combine(addinDir, Path.GetFileName(result.Path));
-                    if (File.Exists(result.Path))
-                    {
-                        if (File.Exists(destination))
-                        {
-                            try { File.Delete(destination); } catch { }
-                        }
-                        File.Move(result.Path, destination);
-                    }
-
-                    File.WriteAllText(logPath, $"SUCCESS\nPath: {destination}\nRevitVersion: {result.RevitVersion}");
+                    var rfaPath = result.Path;
+                    File.WriteAllText(logPath, $"SUCCESS\nPath: {rfaPath}\nRevitVersion: {result.RevitVersion}");
                 }
                 else
                 {

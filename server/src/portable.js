@@ -112,8 +112,9 @@ $manifestContent = @"
 [System.IO.File]::WriteAllText($manifestFile, $manifestContent, (New-Object System.Text.UTF8Encoding($false)))
 Write-Host "[OK] Da nap runner tu dong vao Revit (va bo qua hop thoai Security)." -ForegroundColor Cyan
 
-# Dat co de PortableAutoApp tu dong dong Revit sau khi dung xong
+# Dat co de PortableAutoApp tu dong dong Revit sau khi dung xong va luu truc tiep tai thu muc hien tai
 [System.Environment]::SetEnvironmentVariable("FAMILY_AGENT_AUTO_EXIT", "1", "Process")
+[System.Environment]::SetEnvironmentVariable("FAMILY_AGENT_OUT", $currentDir, "Process")
 
 # 3. Kiem tra va khoi chay Revit tu dong
 $isRunning = Get-Process -Name "Revit" -ErrorAction SilentlyContinue
@@ -125,7 +126,7 @@ if ($isRunning) {
 } else {
     Write-Host "[THONG BAO]: Dang khoi dong Revit de tu dong dung Native Family..." -ForegroundColor Green
 }
-Write-Host "Ban khong can thao tac gi them, he thong se TU DONG dung va MOVE file .rfa ve day!" -ForegroundColor Cyan
+Write-Host "Ban khong can thao tac gi them, he thong se TU DONG dung truc tiep file .rfa tai day!" -ForegroundColor Cyan
 Write-Host "---------------------------------------------------------------------" -ForegroundColor Gray
 Write-Host ""
 
@@ -147,7 +148,7 @@ for ($i = 0; $i -lt 180; $i++) {
 Write-Host ""
 if ($rfaFound) {
     Write-Host "=====================================================================" -ForegroundColor Green
-    Write-Host "  THANH CONG! DA MOVE FILE .RFA VE NGAY THU MUC CUA BAN:" -ForegroundColor Green
+    Write-Host "  THANH CONG! FILE .RFA DA DUOC TAO TRUC TIEP TAI THU MUC CUA BAN:" -ForegroundColor Green
     Write-Host "  -> $targetRfa" -ForegroundColor Yellow
     Write-Host "  File la Native Family 100% (Day du khoi Solid va tham so bien thien)!" -ForegroundColor Green
     Write-Host "=====================================================================" -ForegroundColor Green
