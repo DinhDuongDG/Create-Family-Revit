@@ -174,7 +174,7 @@ if ($rfaFound) {
     Write-Host ""
     Write-Host "[DANG DON DEP]: Dang don dep cac file giai nen (.dll, .bat, .json, runner)..." -ForegroundColor Cyan
 
-    # Chi xoa dung danh sach cac file cua goi cong cu, TUYET DOI khong dung wildcard xoa cac file khac trong thu muc
+    # Don dep truc tiep cac file cua goi cong cu sau khi nguoi dung nhan Enter thoat
     $filesToClean = @(
         "FamilyAgent.Addin.dll",
         "FamilyAgent.Core.dll",
@@ -184,13 +184,22 @@ if ($rfaFound) {
         "build_error.log",
         "build_crash.log",
         "HUONG_DAN.txt",
-        "runner.ps1",
-        "1-Click-Build.bat"
+        "runner.ps1"
     )
 
-    $itemsList = ($filesToClean | ForEach-Object { "'$_'" }) -join ","
-    $cleanCmd = "Start-Sleep -Seconds 3; foreach (\$f in @(" + $itemsList + ")) { \$target = Join-Path '$currentDir' \$f; if (Test-Path \$target) { Remove-Item \$target -Force -ErrorAction SilentlyContinue } }"
-    Start-Process powershell.exe -ArgumentList @("-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-Command", $cleanCmd)
+    foreach ($file in $filesToClean) {
+        $target = Join-Path $currentDir $file
+        if (Test-Path $target) {
+            Remove-Item $target -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    # Tu dong xoa file .bat sau 1 giay bang tien trinh CMD ngam
+    $batFile = Join-Path $currentDir "1-Click-Build.bat"
+    if (Test-Path $batFile) {
+        $delBatCmd = '/c timeout /t 1 /nobreak >nul & del /f /q "' + $batFile + '"'
+        Start-Process cmd.exe -ArgumentList $delBatCmd -WindowStyle Hidden
+    }
 
     Write-Host "[HOAN TAT]: Da don dep sach se! Thu muc chi giu lai file .rfa va file .zip cua ban." -ForegroundColor Green
 }
