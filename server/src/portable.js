@@ -74,13 +74,13 @@ Write-Host "[OK] Phat hien Revit: $revitExe (Phien ban: $revitVer)" -ForegroundC
 
 # 2. Tao manifest Application tu dong trong %APPDATA%
 $currentDir = $PSScriptRoot
-$addinDir = Join-Path $env:APPDATA "Autodesk\Revit\Addins\$revitVer"
+$addinDir = [System.IO.Path]::Combine($env:APPDATA, "Autodesk", "Revit", "Addins", $revitVer)
 if (-not (Test-Path $addinDir)) {
     New-Item -ItemType Directory -Path $addinDir -Force | Out-Null
 }
 
-$manifestFile = Join-Path $addinDir "FamilyAgent_Portable_Temp.addin"
-$assemblyPath = Join-Path $currentDir "FamilyAgent.Addin.dll"
+$manifestFile = [System.IO.Path]::Combine($addinDir, "FamilyAgent_Portable_Temp.addin")
+$assemblyPath = [System.IO.Path]::Combine($currentDir, "FamilyAgent.Addin.dll")
 $addInGuid = "9b1f4a8e-2c11-4f5a-9a0e-6f1f4d1c2c99"
 
 # Tu dong dang ky AddInId vao CodeSigning Registry de Revit bo qua hop thoai Security Unsigned Add-In (Always Load)
