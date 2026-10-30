@@ -34,12 +34,18 @@ function zipFolder(sourceFolder, zipFilePath) {
  * Tạo kịch bản PowerShell chạy Portable tự động 100% (Zero-click):
  * Khởi động Revit, tự động dựng hình, MOVE file .rfa ra ngoài và tự đóng Revit.
  */
-function generatePs1Script(specName) {
+function generatePs1Script(specName, safeName) {
+  const runnerPs1Name = `runner-${safeName}.ps1`;
+  const batLauncherName = `1-Click-Build-${safeName}.bat`;
+  const specFileName = `${safeName}-spec.json`;
+  const readmeFileName = `HUONG_DAN-${safeName}.txt`;
+
   return `# PowerShell Portable Builder Script (Auto-Build 100%)
 $ErrorActionPreference = "Continue"
 
 Write-Host "=====================================================================" -ForegroundColor Cyan
 Write-Host "  DANG KHOI DONG RUNNER DUNG NATIVE FAMILY CHO REVIT (TU DONG 100%)" -ForegroundColor Green
+Write-Host "  Model: ${specName}" -ForegroundColor Yellow
 Write-Host "=====================================================================" -ForegroundColor Cyan
 
 # 1. Tim kiem Revit.exe
@@ -130,8 +136,10 @@ $manifestContent = @"
 [System.IO.File]::WriteAllText($manifestFile, $manifestContent, (New-Object System.Text.UTF8Encoding($false)))
 Write-Host "[OK] Da nap runner tu dong vao Revit (va bo qua hop thoai Security)." -ForegroundColor Cyan
 
-# Dat co de PortableAutoApp tu dong dong Revit sau khi dung xong va luu truc tiep tai thu muc hien tai
+# Dat bien moi truong: chi ro file spec can build va thu muc luu
+$specFullPath = [System.IO.Path]::Combine($currentDir, "${specFileName}")
 [System.Environment]::SetEnvironmentVariable("FAMILY_AGENT_AUTO_EXIT", "1", "Process")
+[System.Environment]::SetEnvironmentVariable("FAMILY_AGENT_SPEC", $specFullPath, "Process")
 [System.Environment]::SetEnvironmentVariable("FAMILY_AGENT_OUT", $currentDir, "Process")
 
 # 3. Kiem tra va khoi chay Revit tu dong
@@ -193,17 +201,17 @@ if ($rfaFound) {
     Write-Host ""
     Write-Host "[DANG DON DEP]: Dang don dep file trung gian..." -ForegroundColor Cyan
 
-    # Danh sach cac file thuoc goi Portable can don dep
+    # Danh sach cac file thuoc goi Portable cua dung model nay can don dep
     $filesToClean = @(
         "FamilyAgent.Addin.dll",
         "FamilyAgent.Core.dll",
         "Newtonsoft.Json.dll",
-        "${specName}-spec.json",
+        "${specFileName}",
+        "${runnerPs1Name}",
+        "${readmeFileName}",
         "build_result.txt",
         "build_error.log",
-        "build_crash.log",
-        "HUONG_DAN.txt",
-        "runner.ps1"
+        "build_crash.log"
     )
 
     foreach ($file in $filesToClean) {
@@ -222,8 +230,8 @@ if ($rfaFound) {
         Remove-Item -Path $shadowDir -Recurse -Force -ErrorAction SilentlyContinue
     }
 
-    # Tu dong xoa file .bat sau 1 giay bang tien trinh CMD ngam
-    $batFile = Join-Path $currentDir "1-Click-Build.bat"
+    # Tu dong xoa file .bat cua dung model nay sau 1 giay bang tien trinh CMD ngam
+    $batFile = Join-Path $currentDir "${batLauncherName}"
     if (Test-Path $batFile) {
         $delBatCmd = '/c timeout /t 1 /nobreak >nul & del /f /q "' + $batFile + '"'
         Start-Process cmd.exe -ArgumentList $delBatCmd -WindowStyle Hidden
@@ -264,22 +272,22 @@ export async function createPortablePackage(spec) {
     }
   }
 
-  // 3. Tạo file PowerShell script (.ps1) chuẩn UTF-8
-  const ps1Content = generatePs1Script(spec.name || "Family");
-  fs.writeFileSync(path.join(packageDir, "runner.ps1"), ps1Content, "utf8");
+  // 3. Tạo file PowerShell script (.ps1) chuẩn UTF-8 với tên riêng theo model
+  const ps1Content = generatePs1Script(spec.name || "Family", safeName);
+  fs.writeFileSync(path.join(packageDir, `runner-${safeName}.ps1`), ps1Content, "utf8");
 
-  // 4. Tạo file .bat wrapper chuẩn ASCII để double click chạy runner.ps1
-  const batContent = `@echo off\r\ncd /d "%~dp0"\r\npowershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0runner.ps1"\r\n`;
-  fs.writeFileSync(path.join(packageDir, "1-Click-Build.bat"), batContent, "ascii");
+  // 4. Tạo file .bat wrapper chuẩn ASCII với tên riêng theo model
+  const batContent = `@echo off\r\ncd /d "%~dp0"\r\npowershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0runner-${safeName}.ps1"\r\n`;
+  fs.writeFileSync(path.join(packageDir, `1-Click-Build-${safeName}.bat`), batContent, "ascii");
 
-  // 5. Tạo file HDSD ngắn gọn
+  // 5. Tạo file HDSD ngắn gọn với tên riêng theo model
   const readmeContent = `HUONG DAN DUNG FILE .RFA NATIVE TU DONG 100%:
-1. Chi can click dup chuot vao file "1-Click-Build.bat".
+1. Chi can click dup chuot vao file "1-Click-Build-${safeName}.bat".
 2. Revit se tu dong khoi dong ngam, tu dong tao Family, dung tung khoi Solid va gan tham so.
 3. File .rfa se duoc TU DONG MOVE ve ngay thu muc nay.
 4. Cua so thu muc se tu dong mo len cho ban lay file!
 `;
-  fs.writeFileSync(path.join(packageDir, "HUONG_DAN.txt"), readmeContent, "utf8");
+  fs.writeFileSync(path.join(packageDir, `HUONG_DAN-${safeName}.txt`), readmeContent, "utf8");
 
   // 6. Nén thành file zip
   const zipPath = path.join(tempDir, `${safeName}-Portable-Revit.zip`);

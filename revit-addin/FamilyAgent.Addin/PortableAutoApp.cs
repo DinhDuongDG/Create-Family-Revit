@@ -39,10 +39,15 @@ namespace FamilyAgent.Addin
 
             var addinDir = Path.GetDirectoryName(typeof(PortableAutoApp).Assembly.Location) ?? AppDomain.CurrentDomain.BaseDirectory;
 
-            // Tìm file spec.json trong cùng thư mục Portable
-            var specFile = Directory.GetFiles(addinDir, "*spec*.json")
-                .Concat(Directory.GetFiles(addinDir, "*.json"))
-                .FirstOrDefault();
+            // Ưu tiên đọc đường dẫn file spec cụ thể từ biến môi trường FAMILY_AGENT_SPEC nếu có
+            string specFile = Environment.GetEnvironmentVariable("FAMILY_AGENT_SPEC");
+            if (string.IsNullOrEmpty(specFile) || !File.Exists(specFile))
+            {
+                // Nếu không có biến môi trường hoặc file chỉ định không tồn tại, tìm file spec trong cùng thư mục
+                specFile = Directory.GetFiles(addinDir, "*spec*.json")
+                    .Concat(Directory.GetFiles(addinDir, "*.json"))
+                    .FirstOrDefault();
+            }
 
             if (specFile == null || !File.Exists(specFile))
             {
@@ -53,13 +58,17 @@ namespace FamilyAgent.Addin
 
             try
             {
-                // Cấu hình thư mục lưu file .rfa trực tiếp tại thư mục Portable của người dùng
-                Environment.SetEnvironmentVariable("FAMILY_AGENT_OUT", addinDir);
+                // Cấu hình thư mục lưu file .rfa trực tiếp tại thư mục đích nếu có (FAMILY_AGENT_OUT) hoặc thư mục addin
+                var configuredOut = Environment.GetEnvironmentVariable("FAMILY_AGENT_OUT");
+                var targetOutDir = (!string.IsNullOrEmpty(configuredOut) && Directory.Exists(configuredOut))
+                    ? configuredOut
+                    : addinDir;
+                Environment.SetEnvironmentVariable("FAMILY_AGENT_OUT", targetOutDir);
 
                 var json = File.ReadAllText(specFile);
                 var result = FamilyBuilder.Build(uiApp.Application, json);
 
-                var logPath = Path.Combine(addinDir, "build_result.txt");
+                var logPath = Path.Combine(targetOutDir, "build_result.txt");
                 if (result.Ok)
                 {
                     var rfaPath = result.Path;
@@ -72,7 +81,8 @@ namespace FamilyAgent.Addin
             }
             catch (Exception ex)
             {
-                var logPath = Path.Combine(addinDir, "build_crash.log");
+                var targetOutDir = Environment.GetEnvironmentVariable("FAMILY_AGENT_OUT") ?? addinDir;
+                var logPath = Path.Combine(targetOutDir, "build_crash.log");
                 File.WriteAllText(logPath, ex.ToString());
             }
             finally
