@@ -22,11 +22,11 @@ interface Props {
   onRevitVersion: (version: string) => void;
   lod: Lod;
   onLod: (lod: Lod) => void;
-  onBuild: () => void;
+  onBuild?: () => void;
   onExportPortable?: () => void;
   exportingPortable?: boolean;
   canBuild: boolean;
-  building: boolean;
+  building?: boolean;
   onSaveModel?: () => void;
   onOpenLibrary?: () => void;
   onNewModel?: () => void;
@@ -72,11 +72,9 @@ export function TopBar({
   onRevitVersion,
   lod,
   onLod,
-  onBuild,
   onExportPortable,
   exportingPortable,
   canBuild,
-  building,
   onSaveModel,
   onOpenLibrary,
   onNewModel,
@@ -263,15 +261,14 @@ export function TopBar({
         {onExportPortable && (
           <button
             type="button"
-            className="btn-secondary"
+            className="btn-primary"
             onClick={onExportPortable}
             disabled={!canBuild || exportingPortable}
             title="Tải gói chạy 1-Click dựng Native Family (không cần cài Add-in)"
-            style={{ fontWeight: 500, borderColor: "var(--accent, #2563eb)", color: "var(--accent, #2563eb)" }}
           >
             {exportingPortable ? (
               <>
-                <span className="spinner" style={{ width: 11, height: 11, borderTopColor: "currentColor" }} />
+                <span className="spinner" style={{ width: 11, height: 11, borderTopColor: "#fff" }} />
                 Đang nén gói...
               </>
             ) : (
@@ -281,27 +278,13 @@ export function TopBar({
                   <polyline points="7 10 12 15 17 10" />
                   <line x1="12" y1="15" x2="12" y2="3" />
                 </svg>
-                <span>Tải gói 1-Click RFA</span>
+                <span>Tải RFA</span>
               </>
             )}
           </button>
         )}
 
-        <button type="button" className="btn-primary" onClick={onBuild} disabled={!canBuild || building}>
-          {building ? (
-            <>
-              <span className="spinner" style={{ width: 11, height: 11, borderTopColor: "#fff" }} />
-              Building
-            </>
-          ) : (
-            <>
-              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <path d="M8 2v8M4.5 6.5 8 10l3.5-3.5M2 13h12" />
-              </svg>
-              Build Revit family
-            </>
-          )}
-        </button>
+        
       </div>
     </header>
   );
