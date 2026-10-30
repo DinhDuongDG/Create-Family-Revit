@@ -5,8 +5,9 @@ import { analyzeSpec } from "@family/spec-core";
 import { config } from "./config.js";
 import { design } from "./designer.js";
 import { buildFamily } from "./bridge.js";
-import { agentStatus, getCmdcModels } from "./agents.js";
+import { agentStatus, detectAgentBackends, getCmdcModels } from "./agents.js";
 import { bridgeAlive, ensureBridge, findRevitExe } from "./revit.js";
+import { createPortablePackage } from "./portable.js";
 
 const app = express();
 app.use(express.json({ limit: "30mb" }));
@@ -143,10 +144,22 @@ app.post("/api/verify-api", async (req, res) => {
 });
 
 app.get("/api/health", async (_req, res) => {
-  const models = await getCmdcModels();
+  const [models, backends] = await Promise.all([getCmdcModels(), detectAgentBackends()]);
+  const status = agentStatus();
+  const anyCli = backends.commandcode || backends.agy || backends.codex || backends.claude;
+  const ready = status.provider === "openai" ? backends.openai : anyCli;
+  const detail =
+    status.provider === "openai"
+      ? status.detail
+      : ready
+        ? backends.commandcode
+          ? status.detail
+          : `"${config.agent.command}" không có trên máy — chọn model từ CLI đang cài hoặc Direct API`
+        : `Không tìm thấy CLI nào trên máy — cài CLI hoặc dùng Direct API`;
   res.json({
     ok: true,
-    agent: agentStatus(),
+    agent: { ...status, ready, detail },
+    backends,
     models,
     bridge: config.bridge.url,
     revit: {
@@ -255,6 +268,24 @@ app.post("/api/build", async (req, res) => {
     res.json(result);
   } catch (error) {
     res.status(500).json({ ok: false, error: error?.message || String(error) });
+  }
+});
+
+app.post("/api/export-portable", async (req, res) => {
+  const analysis = analyzeSpec(req.body?.spec);
+  if (!analysis.ok) {
+    res.status(400).json({ ok: false, error: "Spec contains errors", issues: analysis.errors });
+    return;
+  }
+
+  try {
+    const pkg = await createPortablePackage(analysis.spec);
+    res.download(pkg.zipPath, pkg.fileName, (err) => {
+      pkg.cleanup();
+    });
+  } catch (err) {
+    console.error("Portable package creation error:", err);
+    res.status(500).json({ ok: false, error: err.message || "Failed to generate portable package" });
   }
 });
 

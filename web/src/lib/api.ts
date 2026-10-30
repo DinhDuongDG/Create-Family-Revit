@@ -47,10 +47,19 @@ export interface CmdcModel {
   label: string;
 }
 
+export interface AgentBackends {
+  commandcode: boolean;
+  agy: boolean;
+  codex: boolean;
+  claude: boolean;
+  openai: boolean;
+}
+
 export interface Health {
   ok: boolean;
   agent: AgentStatus;
   models?: CmdcModel[];
+  backends?: AgentBackends;
   bridge: string;
   outDir: string;
   queueDir: string;
@@ -234,6 +243,29 @@ export async function buildFamily(spec: FamilySpec): Promise<BuildResult> {
   }
 
   return payload;
+}
+
+export async function downloadPortablePackage(spec: FamilySpec): Promise<void> {
+  const response = await fetch("/api/export-portable", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ spec }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => "");
+    throw new Error(errorText || "Không thể tạo gói Portable (HTTP " + response.status + ")");
+  }
+
+  const blob = await response.blob();
+  const blobUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = blobUrl;
+  link.download = (spec.name || "Family") + "-Portable-1Click.zip";
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(blobUrl);
 }
 
 // -------------------------------------------------------------

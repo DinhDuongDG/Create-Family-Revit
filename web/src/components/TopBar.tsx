@@ -22,10 +22,13 @@ interface Props {
   onRevitVersion: (version: string) => void;
   lod: Lod;
   onLod: (lod: Lod) => void;
-  onBuild: () => void;
+  onBuild?: () => void;
+  onExportPortable?: () => void;
+  exportingPortable?: boolean;
   canBuild: boolean;
-  building: boolean;
+  building?: boolean;
   onSaveModel?: () => void;
+  onSaveModelAs?: () => void;
   onOpenLibrary?: () => void;
   onNewModel?: () => void;
   onLoadDemo?: (key: "fcu" | "pump" | "elbow") => void;
@@ -70,10 +73,11 @@ export function TopBar({
   onRevitVersion,
   lod,
   onLod,
-  onBuild,
+  onExportPortable,
+  exportingPortable,
   canBuild,
-  building,
   onSaveModel,
+  onSaveModelAs,
   onOpenLibrary,
   onNewModel,
   onLoadDemo,
@@ -218,6 +222,21 @@ export function TopBar({
           </button>
         )}
 
+        {hasSpec && onSaveModelAs && (
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={onSaveModelAs}
+            title="Lưu thành một bản mới, giữ nguyên bản đang mở"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="9" y="9" width="12" height="12" rx="2" />
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+            </svg>
+            <span>Save as</span>
+          </button>
+        )}
+
         <div className="segmented" role="group" aria-label="Units">
           <button type="button" className={units === "mm" ? "active" : ""} onClick={() => onUnits("mm")}>
             mm
@@ -256,21 +275,33 @@ export function TopBar({
           <option value="2026">Revit 2026</option>
         </select>
 
-        <button type="button" className="btn-primary" onClick={onBuild} disabled={!canBuild || building}>
-          {building ? (
-            <>
-              <span className="spinner" style={{ width: 11, height: 11, borderTopColor: "#fff" }} />
-              Building
-            </>
-          ) : (
-            <>
-              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <path d="M8 2v8M4.5 6.5 8 10l3.5-3.5M2 13h12" />
-              </svg>
-              Build Revit family
-            </>
-          )}
-        </button>
+        {onExportPortable && (
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={onExportPortable}
+            disabled={!canBuild || exportingPortable}
+            title="Tải gói chạy 1-Click dựng Native Family (không cần cài Add-in)"
+          >
+            {exportingPortable ? (
+              <>
+                <span className="spinner" style={{ width: 11, height: 11, borderTopColor: "#fff" }} />
+                Đang nén gói...
+              </>
+            ) : (
+              <>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                <span>Tải RFA</span>
+              </>
+            )}
+          </button>
+        )}
+
+        
       </div>
     </header>
   );
