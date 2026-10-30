@@ -174,23 +174,11 @@ if ($rfaFound) {
     Write-Host ""
     Write-Host "[DANG DON DEP]: Dang don dep cac file giai nen (.dll, .bat, .json, runner)..." -ForegroundColor Cyan
 
-    # Tao script batch ngam de tu xoa toan bo file phu sau khi tien trinh ket thuc (giu lai .rfa va .zip)
-    $cleanScript = Join-Path $env:TEMP ("cleanup-" + [System.Guid]::NewGuid().ToString() + ".bat")
-    $cleanBatchContent = @"
-@echo off
-timeout /t 2 /nobreak >nul
-del /f /q "$currentDir\\*.dll" 2>nul
-del /f /q "$currentDir\\*.json" 2>nul
-del /f /q "$currentDir\\build_result.txt" 2>nul
-del /f /q "$currentDir\\build_error.log" 2>nul
-del /f /q "$currentDir\\HUONG_DAN.txt" 2>nul
-del /f /q "$currentDir\\runner.ps1" 2>nul
-del /f /q "$currentDir\\1-Click-Build.bat" 2>nul
-del "%~f0" 2>nul
-"@
-    [System.IO.File]::WriteAllText($cleanScript, $cleanBatchContent, [System.Text.Encoding]::ASCII)
-    Start-Process $cleanScript -WindowStyle Hidden
-    Write-Host "[HOAN TAT]: Da don dep sach se! Thu muc chi giu lai file .rfa va goi .zip cua ban." -ForegroundColor Green
+    # Kich hoat PowerShell ngam don dep tat ca file phu ngoai tru file .rfa va .zip
+    $cleanCmd = "Start-Sleep -Seconds 3; Get-ChildItem -LiteralPath '$currentDir' -Exclude '*.rfa', '*.zip' | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue"
+    Start-Process powershell.exe -ArgumentList @("-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-Command", $cleanCmd)
+
+    Write-Host "[HOAN TAT]: Da don dep sach se! Thu muc chi giu lai file .rfa va file .zip cua ban." -ForegroundColor Green
 }
 
 Read-Host "Nhan Enter de thoat..."
